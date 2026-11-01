@@ -253,6 +253,11 @@ import { resolveRemoteClaudeRoute } from './remote-claude-route.js';
 import { resolveDesktopClaudeSubagentModelAccess } from './subagent-model-access.js';
 import { claudeSubagentUsageBridge } from './claude-subagent-usage-bridge.js';
 import { getClaudeSubscriptionLauncherConfig } from './claude-subscription-launcher.js';
+import {
+  startClaudeSubscriptionEnvFollow,
+  type ClaudeSubscriptionEnvFollower,
+} from './claude-subscription-env-follow.js';
+import { refreshClaudeCliLoginStatus } from './claude-native-cli.js';
 import { createAutoPermissionReviewer } from './auto-permission-reviewer.js';
 import { createToolLoopReviewer } from './tool-loop-reviewer.js';
 import { createCustomAutoReviewFallback, requestUtilityText } from '../utility-model/oneShotCandidates.js';
@@ -420,6 +425,7 @@ type RemoteCcQuery = Awaited<
 >;
 
 let _maker: Maker | null = null;
+let _claudeSubscriptionEnvFollow: ClaudeSubscriptionEnvFollower | null = null;
 setPluginModelPickerAgentProvider(() => _maker?.listAvailableAgents() ?? []);
 let remoteWorkerBridge: ReturnType<typeof createOrcaRemoteWorkerBridge> | null = null;
 
@@ -3279,6 +3285,15 @@ export function getMaker(): Maker {
       makerRef.refreshAgentLocalModels('claude-code', { onSupportedModels }),
     );
     requestAnthropicModelProbe();
+    // 本地定制:跟随 CC Care 环境切换(释放旧环境的空闲任务、刷新登录态与模型清单)。
+    _claudeSubscriptionEnvFollow = startClaudeSubscriptionEnvFollow({
+      listSessions: () => makerRef.listActiveSessions(),
+      closeSession: (sessionId) => makerRef.closeSession(sessionId),
+      onEnvironmentChanged: () => {
+        void refreshClaudeCliLoginStatus({ force: true });
+        requestAnthropicModelProbe();
+      },
+    });
   }
   return _maker;
 }
@@ -3408,6 +3423,8 @@ export function resetMaker(): void {
   setSessionArchiveSyncRequester(null);
   cancelCodexAuthModeChange();
   setCodexAppliedCustomProviderRoutes([]);
+  _claudeSubscriptionEnvFollow?.stop();
+  _claudeSubscriptionEnvFollow = null;
   _maker = null;
   botRuntimeResourcePreflight = null;
   _registerPiAgent = null;

@@ -181,7 +181,11 @@ import {
 import { repairForkedClaudeSessionJsonl, type RepairForkedClaudeJsonlResult } from './fork-jsonl-repair.js';
 import { ensureClaudeTranscriptInWorkingDir } from './transcript-relocation.js';
 import { findClaudeSessionJsonl } from './claude-projects-fs.js';
-import { getClaudeSubscriptionLauncher } from './subscription-launcher.js';
+import {
+  assertClaudeTranscriptBelongsToLauncher,
+  getClaudeSubscriptionLauncher,
+  noteClaudeSubscriptionSession,
+} from './subscription-launcher.js';
 import { normalizeClaudeSessionJsonlToolIds } from './jsonl-tool-id-normalize.js';
 import { isClaudeResumeSessionNotFound } from './invalid-resume.js';
 import { translateSdkMessage, newRuntimeState, type TurnState, type RuntimeState } from './translator.js';
@@ -1104,7 +1108,10 @@ export class ClaudeCodeAgent extends BaseAgent {
       });
       // 本地定制:订阅探测同样走外部启动程序(见 subscription-launcher.ts)。
       const subscriptionLauncher = getClaudeSubscriptionLauncher();
-      if (subscriptionLauncher) env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir;
+      if (subscriptionLauncher) {
+        Object.assign(env, subscriptionLauncher.env);
+        env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir;
+      }
       q = sdkQuery({
         prompt: idleInput as unknown as Parameters<typeof sdkQuery>[0]['prompt'],
         options: {
@@ -1497,7 +1504,9 @@ export class ClaudeCodeAgent extends BaseAgent {
     // 否则会撞 TDZ）。
     let mutableContextWindowBudget: number | null = opts.contextWindowBudget ?? null;
     // 本地定制:订阅会话改走外部启动程序(CC Care 等),网关 / 供应商会话保持内置 CLI。
+    // 启动时取一次:跟随模式下切换环境只影响之后新开的会话,本会话固定在这里。
     const subscriptionLauncher = nativeCliAuth ? getClaudeSubscriptionLauncher() : null;
+    if (opts.sessionId) noteClaudeSubscriptionSession(opts.sessionId, subscriptionLauncher?.label);
     const binaryPath = subscriptionLauncher?.executable ?? this.deps.binaryPath;
     const providerRoutedModels = this.capabilities.availableModels.filter((model) =>
       isProviderRoutedModel(model.id),
@@ -1566,7 +1575,10 @@ export class ClaudeCodeAgent extends BaseAgent {
     });
     // 本地定制:让转录 / agents / skills 扫描与外部启动程序看到同一个配置目录。
     // 启动程序自己也会设这个值,两边一致。
-    if (subscriptionLauncher) env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir;
+    if (subscriptionLauncher) {
+      Object.assign(env, subscriptionLauncher.env);
+      env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir;
+    }
 
     // 「Subagent 模型」设置的默认值语义(见 subagent-model-default.ts):
     // 平台的 CLAUDE_CODE_SUBAGENT_MODEL 是最高优先级**强制覆盖**,会静默盖掉用户手写
@@ -4297,6 +4309,11 @@ export class ClaudeCodeAgent extends BaseAgent {
       // projectsRoot 按子进程实际可见的 CLAUDE_CONFIG_DIR 解析(SDK spawn 时
       // {...process.env, ...env} 合并,env 覆盖优先)。best-effort:已在位只花一次
       // stat,失败/缺失只记日志不阻断——CLI 找不到时仍按原行为报错。
+      // 本地定制:继续旧任务前核对它属于哪个环境(见 subscription-launcher.ts)。放在下面
+      // best-effort 的 try 之外:不属于当前环境时必须让启动失败,不能静默转成新会话。
+      if (subscriptionLauncher && resumeSdkSid && opts.workingDir) {
+        await assertClaudeTranscriptBelongsToLauncher(subscriptionLauncher, resumeSdkSid, opts.workingDir);
+      }
       if (resumeSdkSid && opts.workingDir) {
         try {
           const claudeConfigDir =

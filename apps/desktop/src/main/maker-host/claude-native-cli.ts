@@ -104,6 +104,8 @@ async function cliEnv(options: { network: boolean }): Promise<NodeJS.ProcessEnv>
   return {
     ...cleanProcessEnv(),
     ...(options.network ? await claudeCliNetworkEnv() : {}),
+    // 本地定制:外部启动程序要的 env(如 CAC_CLIENT),不含凭证。
+    ...getClaudeSubscriptionLauncherConfig()?.env,
   };
 }
 

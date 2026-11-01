@@ -43,7 +43,10 @@ export {
   setClaudeSubscriptionLauncher,
   getClaudeSubscriptionLauncher,
   claudeConfigDirCandidates,
+  claudeSubscriptionSessionLabel,
+  noteClaudeSubscriptionSession,
   type ClaudeSubscriptionLauncher,
+  type ClaudeSubscriptionLauncherPeer,
 } from './claude-code/subscription-launcher.js';
 // host 配置 LLM-context 图片预缩 resizer (注入 logger / 调阈值)
 export {
