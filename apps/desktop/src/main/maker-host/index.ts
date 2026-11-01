@@ -252,6 +252,7 @@ import {
 import { resolveRemoteClaudeRoute } from './remote-claude-route.js';
 import { resolveDesktopClaudeSubagentModelAccess } from './subagent-model-access.js';
 import { claudeSubagentUsageBridge } from './claude-subagent-usage-bridge.js';
+import { getClaudeSubscriptionLauncherConfig } from './claude-subscription-launcher.js';
 import { createAutoPermissionReviewer } from './auto-permission-reviewer.js';
 import { createToolLoopReviewer } from './tool-loop-reviewer.js';
 import { createCustomAutoReviewFallback, requestUtilityText } from '../utility-model/oneShotCandidates.js';
@@ -1008,6 +1009,8 @@ export function getMaker(): Maker {
     // splash 已经 prepare 过, 这里只是同步读 cache 路径; 任一缺失说明 bootstrap
     // 顺序错了, 早抛比 session.start 时再炸更清晰。
     const claudePath = getReadyBinaryPath('claude-code');
+    // 本地定制:在构造 agent 前把订阅启动程序登记到 maker-core。
+    getClaudeSubscriptionLauncherConfig();
     if (!claudePath) {
       throw new Error(
         'getMaker: Claude binary not provisioned (bootstrap must run agent-binaries.prepare("claude-code") before getMaker)',

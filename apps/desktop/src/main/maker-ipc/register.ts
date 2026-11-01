@@ -5,7 +5,7 @@ import { assertSessionCreationCurrent, currentSessionCreationSignal } from '../l
 import { resumeInterruptedScheduleRun } from '../scheduler-host/index.js';
 import { readTaskDeliveryNote } from '../bot-autonomy/hub.js';
 import { setVoiceTaskDispatch, setVoiceCallMemoryReader } from '../voice-conversation/taskBridge.js';
-import { buildBotMemoryScopeKey, SessionCreationCleanupPendingError } from '@cindy/maker-core';
+import { buildBotMemoryScopeKey, getClaudeSubscriptionLauncher, SessionCreationCleanupPendingError } from '@cindy/maker-core';
 import { createOrcaWorkerProjectHandlers } from './orcaWorkerProjectHandlers';
 import { getTeamByWorkerSession } from '../localDb/orcaTeamStore';
 import { readWorkerProjectContext, createWorkerWorktree, rememberWorkerProject, probeWorkerProject, resolveWorkerWorktreeSourceSelection, getWorkerOwnedWorktree } from './orcaWorkerProject';
@@ -18446,7 +18446,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         ? await maker.listAgentRuntimeSkills(session.agentKind, {
           workingDir: session.workDir,
           sessionId: session.id,
-          runtimeConfigDir: process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), '.claude'),
+          runtimeConfigDir: process.env.CLAUDE_CONFIG_DIR?.trim()
+            || getClaudeSubscriptionLauncher()?.configDir
+            || path.join(os.homedir(), '.claude'),
         })
         : await maker.listAgentSkills(session.agentKind, {
           workingDir: session.workDir,

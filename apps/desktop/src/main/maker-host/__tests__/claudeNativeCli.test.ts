@@ -32,6 +32,8 @@ vi.mock('@cindy/anthropic-compat-proxy', async (original) => ({
   hasProxyEnvConfig: () => h.envProxy,
 }));
 vi.mock('../claude-cli-proxy-bridge.js', () => ({ ensureClaudeCliProxyBridge: h.bridge }));
+// 本地定制的订阅启动程序未配置:保持上游行为。
+vi.mock('../claude-subscription-launcher.js', () => ({ getClaudeSubscriptionLauncherConfig: () => null }));
 vi.mock('node:child_process', () => ({ spawn: h.spawn }));
 
 import {

@@ -181,6 +181,7 @@ import {
 import { repairForkedClaudeSessionJsonl, type RepairForkedClaudeJsonlResult } from './fork-jsonl-repair.js';
 import { ensureClaudeTranscriptInWorkingDir } from './transcript-relocation.js';
 import { findClaudeSessionJsonl } from './claude-projects-fs.js';
+import { getClaudeSubscriptionLauncher } from './subscription-launcher.js';
 import { normalizeClaudeSessionJsonlToolIds } from './jsonl-tool-id-normalize.js';
 import { isClaudeResumeSessionNotFound } from './invalid-resume.js';
 import { translateSdkMessage, newRuntimeState, type TurnState, type RuntimeState } from './translator.js';
@@ -1101,12 +1102,15 @@ export class ClaudeCodeAgent extends BaseAgent {
         nativeCliAuth: true,
         subagentModel: null,
       });
+      // 本地定制:订阅探测同样走外部启动程序(见 subscription-launcher.ts)。
+      const subscriptionLauncher = getClaudeSubscriptionLauncher();
+      if (subscriptionLauncher) env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir;
       q = sdkQuery({
         prompt: idleInput as unknown as Parameters<typeof sdkQuery>[0]['prompt'],
         options: {
           abortController,
           cwd: probeDir,
-          pathToClaudeCodeExecutable: this.deps.binaryPath,
+          pathToClaudeCodeExecutable: subscriptionLauncher?.executable ?? this.deps.binaryPath,
           env,
         },
       });
@@ -1492,7 +1496,9 @@ export class ClaudeCodeAgent extends BaseAgent {
     // 必须早于下面的 configuredWindows （窗口表在 buildQuery 之前就要用它，
     // 否则会撞 TDZ）。
     let mutableContextWindowBudget: number | null = opts.contextWindowBudget ?? null;
-    const binaryPath = this.deps.binaryPath;
+    // 本地定制:订阅会话改走外部启动程序(CC Care 等),网关 / 供应商会话保持内置 CLI。
+    const subscriptionLauncher = nativeCliAuth ? getClaudeSubscriptionLauncher() : null;
+    const binaryPath = subscriptionLauncher?.executable ?? this.deps.binaryPath;
     const providerRoutedModels = this.capabilities.availableModels.filter((model) =>
       isProviderRoutedModel(model.id),
     );
@@ -1558,6 +1564,9 @@ export class ClaudeCodeAgent extends BaseAgent {
       // 拿到这份 env 之后做 —— 扫描需要 env 里的 CLAUDE_CONFIG_DIR 才能找对目录。
       subagentModel: null,
     });
+    // 本地定制:让转录 / agents / skills 扫描与外部启动程序看到同一个配置目录。
+    // 启动程序自己也会设这个值,两边一致。
+    if (subscriptionLauncher) env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir;
 
     // 「Subagent 模型」设置的默认值语义(见 subagent-model-default.ts):
     // 平台的 CLAUDE_CODE_SUBAGENT_MODEL 是最高优先级**强制覆盖**,会静默盖掉用户手写

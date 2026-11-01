@@ -27,6 +27,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@cindy/maker-core', () => ({
   relocateClaudeSessionTranscripts: h.relocate,
+  getClaudeSubscriptionLauncher: () => null,
 }));
 vi.mock('../../localDb/client/current.js', () => ({
   getDbClient: () => ({ queryOne: h.queryOne, query: h.query, exec: h.exec }),

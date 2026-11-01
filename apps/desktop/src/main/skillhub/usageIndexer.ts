@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
+import { getClaudeSubscriptionLauncher } from '@cindy/maker-core';
 import { brandUserDataDirName } from '@cindy/maker-shared/brand-identity';
 import { CURRENT_CINDY_REGION } from '../../shared/brandRegion.js';
 
@@ -521,6 +522,8 @@ function defaultXdtUserDataDir(
 function claudeHomeCandidates(context: TranscriptDiscoveryContext): string[] {
   return [
     context.env.CLAUDE_CONFIG_DIR ?? '',
+    // 本地定制:外部启动程序(CC Care)的配置目录。
+    getClaudeSubscriptionLauncher()?.configDir ?? '',
     path.join(context.homeDir, '.claude'),
     path.join(context.userDataDir, 'claude-home'),
   ];

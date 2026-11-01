@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 import { findClaudeSessionJsonl, resolveClaudeProjectsRoot } from './claude-projects-fs.js';
+import { claudeConfigDirCandidates } from './subscription-launcher.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -333,7 +335,16 @@ export async function repairForkedClaudeSessionJsonl(
   options: RepairForkedClaudeJsonlOptions,
 ): Promise<RepairForkedClaudeJsonlResult> {
   const projectsRoot = options.projectsRoot ?? resolveClaudeProjectsRoot();
-  const filePath = await findClaudeSessionJsonl(options.sessionId, options.workingDir, projectsRoot);
+  let filePath = await findClaudeSessionJsonl(options.sessionId, options.workingDir, projectsRoot);
+  // 本地定制:订阅会话(外部启动程序)与网关会话的转录分在两个配置目录,未指定根时都找一遍。
+  if (!filePath && !options.projectsRoot) {
+    for (const dir of claudeConfigDirCandidates()) {
+      const root = path.join(dir, 'projects');
+      if (root === projectsRoot) continue;
+      filePath = await findClaudeSessionJsonl(options.sessionId, options.workingDir, root);
+      if (filePath) break;
+    }
+  }
   if (!filePath) {
     throw new Error(`Claude session JSONL ${options.sessionId} not found under ${projectsRoot}`);
   }

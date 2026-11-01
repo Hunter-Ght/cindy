@@ -15,6 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 
+import { getClaudeSubscriptionLauncher } from '@cindy/maker-core';
+
 import { getCurrentDbClientUserId, getDbClient } from '../localDb/client/current.js';
 import { createLogger } from '../logger.js';
 import { normalizeWorkingDirForStorage } from '../../shared/workingDir.js';
@@ -302,10 +304,20 @@ export async function importExternalClaudeCodeMessagesForSession(sessionId: stri
 }
 
 async function discoverClaudeProjectsRoots(): Promise<string[]> {
-  const defaultRoot = path.join(os.homedir(), '.claude', 'projects');
-  const real = await realpathOrNull(defaultRoot);
-  if (!real || !(await hasClaudeJsonlFiles(real))) return [];
-  return [real];
+  // 本地定制:默认 ~/.claude 之外,也扫外部启动程序(CC Care)的配置目录。
+  const roots: string[] = [];
+  for (const dir of localClaudeConfigDirs()) {
+    const real = await realpathOrNull(path.join(dir, 'projects'));
+    if (real && !roots.includes(real) && (await hasClaudeJsonlFiles(real))) roots.push(real);
+  }
+  return roots;
+}
+
+function localClaudeConfigDirs(): string[] {
+  const dirs = [path.join(os.homedir(), '.claude')];
+  const launcherDir = getClaudeSubscriptionLauncher()?.configDir;
+  if (launcherDir && !dirs.includes(launcherDir)) dirs.unshift(launcherDir);
+  return dirs;
 }
 
 async function realpathOrNull(p: string): Promise<string | null> {
@@ -1079,16 +1091,21 @@ function projectDirFromClaudeStorageDir(storageName: string): string | null {
 function readClaudeProjectDirByStorageName(): Map<string, string> {
   if (claudeProjectDirByStorageName) return claudeProjectDirByStorageName;
   const out = new Map<string, string>();
-  const configPath = path.join(os.homedir(), '.claude.json');
-  try {
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as unknown;
-    if (isRecord(parsed) && isRecord(parsed.projects)) {
-      for (const projectPath of Object.keys(parsed.projects)) {
-        out.set(claudeProjectStorageName(projectPath), projectPath);
+  // 默认目录的登记文件在 ~/.claude.json;自定义 CLAUDE_CONFIG_DIR 时在目录内。
+  const defaultDir = path.join(os.homedir(), '.claude');
+  for (const dir of localClaudeConfigDirs()) {
+    const configPath = dir === defaultDir ? path.join(os.homedir(), '.claude.json') : path.join(dir, '.claude.json');
+    try {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as unknown;
+      if (isRecord(parsed) && isRecord(parsed.projects)) {
+        for (const projectPath of Object.keys(parsed.projects)) {
+          const storageName = claudeProjectStorageName(projectPath);
+          if (!out.has(storageName)) out.set(storageName, projectPath);
+        }
       }
+    } catch {
+      /* optional Claude Code project registry */
     }
-  } catch {
-    /* optional Claude Code project registry */
   }
   claudeProjectDirByStorageName = out;
   return out;

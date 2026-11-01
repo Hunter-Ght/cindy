@@ -11,6 +11,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { getClaudeSubscriptionLauncher } from './subscription-launcher.js';
+
 /**
  * CLI 对超长 cwd 的转码 key 会追加私有 hash,本侧无法复算。超过该长度时:
  * 查找侧可以用前缀 + 全目录扫描兜底;写入侧(迁移)则放弃,避免写错目录。
@@ -32,7 +34,9 @@ export function isClaudeProjectKeyExact(cwd: string): boolean {
 
 /** 解析 Claude CLI 配置目录下的 projects 根目录(尊重 CLAUDE_CONFIG_DIR 重定向)。 */
 export function resolveClaudeProjectsRoot(): string {
-  const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
+  const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+    ?? getClaudeSubscriptionLauncher()?.configDir
+    ?? path.join(os.homedir(), '.claude');
   return path.join(claudeConfigDir, 'projects');
 }
 

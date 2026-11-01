@@ -38,6 +38,13 @@ export {
   cleanProcessEnv,
   stripSensitiveAnthropicEnv,
 } from './claude-code/env-builder.js';
+// 本地定制:订阅会话的外部启动程序(CC Care 等),见 subscription-launcher.ts
+export {
+  setClaudeSubscriptionLauncher,
+  getClaudeSubscriptionLauncher,
+  claudeConfigDirCandidates,
+  type ClaudeSubscriptionLauncher,
+} from './claude-code/subscription-launcher.js';
 // host 配置 LLM-context 图片预缩 resizer (注入 logger / 调阈值)
 export {
   ImageResizer,

@@ -23,6 +23,7 @@ import { getReadyBinaryPath } from '../agent-binaries/index.js';
 import { createLogger } from '../logger.js';
 import { resolveDesktopOutboundProxy } from './outbound-proxy-resolver.js';
 import { ensureClaudeCliProxyBridge } from './claude-cli-proxy-bridge.js';
+import { getClaudeSubscriptionLauncherConfig } from './claude-subscription-launcher.js';
 import {
   isClaudeCliLoginStatusFresh,
   peekClaudeCliLoginStatus,
@@ -65,6 +66,8 @@ const LOOPBACK_NO_PROXY = 'localhost,127.0.0.1,::1';
  * HTTPS 经代理走 CONNECT 隧道,TLS 端到端,代理、桥与 Cindy 都看不到凭证。
  */
 export async function claudeCliNetworkEnv(): Promise<Record<string, string>> {
+  // 本地定制:外部启动程序(CC Care)自己管网络出口,不下发 Cindy 的代理桥。
+  if (getClaudeSubscriptionLauncherConfig()) return {};
   const fromEnv = hasProxyEnvConfig();
   let raw: string | null | undefined = null;
   try {
@@ -89,7 +92,8 @@ export async function claudeCliNetworkEnv(): Promise<Record<string, string>> {
 }
 
 function cliBinaryPath(): string | null {
-  return getReadyBinaryPath('claude-code') ?? null;
+  // 本地定制:登录与登录态检查与订阅会话走同一个外部启动程序。
+  return getClaudeSubscriptionLauncherConfig()?.executable ?? getReadyBinaryPath('claude-code') ?? null;
 }
 
 /**
