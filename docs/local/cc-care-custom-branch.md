@@ -200,3 +200,8 @@ Xcode 提供；26.5 SDK 可以编译。装了完整 Xcode 后可去掉。
   `pathToClaudeCodeExecutable: ~/.cac/envs/<env>/bin/claude` 起一个最小 `query`，带上与 Cindy 相同的
   `settings`，先清掉外层会话的 env（见第 7 节）。只用 `-p` 直接调启动程序**不会**带 `--settings`，
   测不出这类问题（2026-11-01 就因此漏测）。
+- 日志里 `cc care active environment { … to: null }`、看不到 Claude 套餐 → `~/.cac/active-environment.json`
+  不存在：多半是后台 Guard 跑的是旧版 CC Care。Guard 运行的是 `~/.cac/releases/<版本>/` 快照
+  （见 `~/Library/LaunchAgents/local.cac.guard.<env>.plist`），只更新源码或替换 App 不会切换；
+  写记录要求快照 ≥ `98e12ef`（`preview.57` 之后的构建）。在 CC Care 里停止保护 → 重新准备并部署 →
+  启动即可，Cindy 无需重启（2026-11-01 另一台 Mac 跑 `preview.55` 即此原因）。
