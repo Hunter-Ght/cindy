@@ -77,8 +77,7 @@
 
 CC Care 侧（`~/Documents/cc_care`，正本见其 `AGENTS.md`「Local host integration」一节）：
 
-- 代码在 cc_care 仓库的 `feat/active-environment-for-hosts` 分支（提交 `0ae75ec`，2026-11-01 已安装）；
-  合入 cc_care 自己的 main 由用户决定。
+- 代码已合入 cc_care 的 `main`（合并提交 `98e12ef`，2026-11-01 已推送到 `Hunter-Ght/cc_care` 并安装）。
 
 - `~/.cac/active-environment.json`（0600，schema 1）由当前环境的 `guard serve` 写入、关闭时删除；
   `cac env active` 可查看。Cindy 只把它当提示，真正的准入仍由环境启动入口负责。
