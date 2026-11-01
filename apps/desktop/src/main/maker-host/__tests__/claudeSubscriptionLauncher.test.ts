@@ -49,7 +49,7 @@ beforeEach(() => {
   harness.userData = path.join(root, 'userData');
   cacHome = path.join(root, 'cac');
   fs.mkdirSync(harness.userData);
-  __testing.reset();
+  __testing.reset(cacHome);
 });
 
 afterEach(() => {
@@ -58,9 +58,19 @@ afterEach(() => {
 });
 
 describe('claude subscription launcher config', () => {
-  it('keeps upstream behavior when no config file exists', () => {
+  it('keeps upstream behavior when there is no config file and CC Care is not installed', () => {
     expect(getClaudeSubscriptionLauncherConfig()).toBeNull();
     expect(getClaudeSubscriptionLauncher()).toBeNull();
+  });
+
+  it('follows the active CC Care environment without a config file once CC Care is installed', () => {
+    const workDir = makeEnv('work');
+    markActive('work');
+    expect(getClaudeSubscriptionLauncherConfig()).toMatchObject({
+      executable: path.join(cacHome, 'envs', 'work', 'bin', 'claude'),
+      configDir: workDir,
+      label: 'cc-care:work',
+    });
   });
 
   it('pins a CC Care environment to its launcher, config dir and peers', () => {
@@ -111,7 +121,9 @@ describe('claude subscription launcher config', () => {
     expect(fs.existsSync(launcher!.executable)).toBe(false);
   });
 
-  it('can be switched off explicitly', () => {
+  it('can be switched off explicitly even with CC Care installed', () => {
+    makeEnv('work');
+    markActive('work');
     writeConfig(JSON.stringify({ enabled: false, ccCareEnv: 'work' }));
     expect(getClaudeSubscriptionLauncherConfig()).toBeNull();
   });

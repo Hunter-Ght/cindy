@@ -70,11 +70,21 @@
 
 ## 4. 与 CC Care 的约定
 
-配置文件 `~/Library/Application Support/CindyGlobal/claude-subscription-launcher.json`：
+**默认装上即用**：没有配置文件时，本机存在 `~/.cac/envs`（装了 CC Care）就等同 `@active`，否则保持
+上游行为（启动时判断一次；先装 Cindy 后装 CC Care 需重启 Cindy）。
 
-- `{ "ccCareEnv": "@active" }`：跟随 CC Care 当前环境（当前使用）。
-- `{ "ccCareEnv": "work" }`：固定某个环境。`{ "enabled": false }` 或删除文件：恢复上游行为。
+可选配置文件 `~/Library/Application Support/CindyGlobal/claude-subscription-launcher.json` 覆盖默认：
+
+- `{ "ccCareEnv": "@active" }`：跟随 CC Care 当前环境（与默认相同）。
+- `{ "ccCareEnv": "work" }`：固定某个环境。`{ "enabled": false }`：即使装了 CC Care 也恢复上游行为。
 - 修改后重启 Cindy 生效。
+
+## 4.1 分发到其它 Mac
+
+打包后（第 6 节）用 `hdiutil create -volname "Cindy (CC Care 定制)" -srcfolder <含 Cindy.app 与
+/Applications 链接的目录> -fs APFS -format UDZO <out>.dmg` 生成 DMG（Agent 沙箱里可以执行）。包只有
+ad-hoc 签名、未公证，目标机安装后需 `xattr -dr com.apple.quarantine /Applications/Cindy.app`。
+目标机须先装好 CC Care（含当前环境记录的版本）并启动一个环境的后台保护。
 
 CC Care 侧（`~/Documents/cc_care`，正本见其 `AGENTS.md`「Local host integration」一节）：
 

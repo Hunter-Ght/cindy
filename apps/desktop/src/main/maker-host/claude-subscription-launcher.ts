@@ -1,7 +1,10 @@
 /**
  * 本地定制:Claude 订阅会话交给 CC Care 独立环境(或其它外部启动程序)运行。
  *
- * 配置文件 `<userData>/claude-subscription-launcher.json`,修改后重启 Cindy 生效:
+ * 默认(没有配置文件):本机装了 CC Care(存在 `~/.cac/envs`)就按 `{ "ccCareEnv": "@active" }`
+ * 跟随 CC Care 当前环境,装上即用;没装 CC Care 则保持上游行为。启动时判断一次。
+ *
+ * 配置文件 `<userData>/claude-subscription-launcher.json` 可覆盖默认,修改后重启 Cindy 生效:
  *
  *   { "ccCareEnv": "@active" }
  *     → 跟随 CC Care 当前正在使用的环境(`~/.cac/active-environment.json`,由该环境的
@@ -16,7 +19,7 @@
  *   { "executable": "/abs/path/claude", "configDir": "/abs/path/.claude" }
  *     → 任意外部启动程序。
  *
- *   { "enabled": false, ... } 或删除文件 → 恢复内置 Claude Code(上游行为)。
+ *   { "enabled": false } → 即使装了 CC Care 也恢复内置 Claude Code(上游行为)。
  *
  * 只影响订阅会话(登录、登录状态检查、会话本身);网关 / 供应商会话仍用内置 CLI。
  * 启动程序自己负责网络出口,所以启用后 Cindy 不再给订阅 CLI 下发代理桥。
@@ -55,6 +58,7 @@ type Config =
   | { kind: 'cc-care'; cacHome: string; environment: string };
 
 let config: Config | null = null;
+let defaultCacHome = (): string => path.join(os.homedir(), '.cac');
 let cache: { key: string; at: number; value: ClaudeSubscriptionLauncher | null } | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -84,7 +88,7 @@ function parse(raw: unknown): Config {
     if (typeof environment !== 'string' || (environment !== ACTIVE && !ENV_NAME.test(environment))) {
       throw new Error('ccCareEnv 无效');
     }
-    const cacHome = raw.cacHome === undefined ? path.join(os.homedir(), '.cac') : absolute(raw.cacHome, 'cacHome');
+    const cacHome = raw.cacHome === undefined ? defaultCacHome() : absolute(raw.cacHome, 'cacHome');
     return { kind: 'cc-care', cacHome, environment };
   }
   return {
@@ -97,13 +101,22 @@ function parse(raw: unknown): Config {
   };
 }
 
+/** 没有配置文件:装了 CC Care 就跟随其当前环境,否则保持上游行为。 */
+function defaultConfig(): Config {
+  const cacHome = defaultCacHome();
+  try {
+    if (fs.statSync(path.join(cacHome, 'envs')).isDirectory()) return { kind: 'cc-care', cacHome, environment: ACTIVE };
+  } catch { /* 没装 CC Care */ }
+  return { kind: 'off' };
+}
+
 function loadConfig(): Config {
   const file = path.join(app.getPath('userData'), CLAUDE_SUBSCRIPTION_LAUNCHER_FILE);
   let raw = '';
   try {
     raw = fs.readFileSync(file, 'utf8');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'off' };
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return defaultConfig();
   }
   try {
     return parse(JSON.parse(raw));
@@ -274,7 +287,8 @@ export function ccCareHome(): string | null {
 }
 
 export const __testing = {
-  reset(): void {
+  reset(cacHome?: string): void {
+    defaultCacHome = () => cacHome ?? path.join(os.homedir(), '.cac');
     config = null;
     cache = null;
     setClaudeSubscriptionLauncher(null);
