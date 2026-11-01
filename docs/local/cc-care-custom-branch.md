@@ -10,8 +10,9 @@
 
 - **目的**：被控端（家里这台 Mac）的 Cindy 把 **Claude 订阅任务**交给 CC Care 独立环境里的
   Claude 运行，使用该环境的账号、出口和保护；控制端（公司电脑）用官方 Cindy 远程操作即可。
-- **形态**：`origin/main`（官方公开源码）＋ 少量带 `本地定制` 标记的提交。**不推送、不提 PR、
-  不合入上游**。上游仓库的 PR 流程、PR 模板、白名单确认门等协作规则对本分支不适用；
+- **形态**：`upstream/main`（官方公开源码）＋ 少量带 `本地定制` 标记的提交。
+  定制分支推送到个人 fork `Hunter-Ght/cindy`，**不向官方仓库推送、提 PR 或合入上游**。
+  上游仓库的 PR 流程、PR 模板、白名单确认门等协作规则对本分支不适用；
   上游的工程与安全规则（凭证不入库、测试真实入口等）照常适用。
 - **依赖的另一半**：CC Care 仓库（`~/Documents/cc_care`）提供的约定，见第 4 节。改约定时两边一起改。
 - **当前安装**：`/Applications/Cindy.app` 是本分支打的包（版本 `0.0.0`，ad-hoc 签名）。
@@ -87,21 +88,31 @@ CC Care 侧（`~/Documents/cc_care`，正本见其 `AGENTS.md`「Local host inte
 
 ## 5. 同步上游流程
 
+### 远端与推送约定
+
+- `origin`：`https://github.com/Hunter-Ght/cindy.git`，保存自己的定制分支。
+- `upstream`：`https://github.com/makecindy/cindy.git`，只用于读取官方更新。
+- `custom/cc-care-launcher` 跟踪 `origin/custom/cc-care-launcher`；本仓默认推送远端为 `origin`。
+- 提交并完成对应验证后，用 `git push` 更新个人 fork；不要用 `--force` 覆盖远端历史。
+- 已推送分支同步上游优先使用 `git merge upstream/main`，保留远端历史。`git rebase upstream/main`
+  仅用于尚未发布的提交；需要改写已发布历史时，须先获得用户明确授权，再用 `--force-with-lease`。
+- 2026-11-01 起按用户决定改为个人 fork 保存；“本地定制”仍表示不合入官方仓库。
+
 前提：工作区干净；先读本文件和上游新版 `AGENTS.md` 的变化。
 
 ```bash
 cd ~/Documents/cindy
-git fetch origin
+git fetch upstream
 git tag backup/cc-care-$(date +%Y%m%d-%H%M) custom/cc-care-launcher   # 回滚点
-git log --oneline origin/main..custom/cc-care-launcher                   # 确认只有定制提交
+git log --oneline upstream/main..custom/cc-care-launcher                   # 确认只有定制提交
 git config rerere.enabled true                                            # 重复冲突自动复用解法
-git rebase origin/main
+git merge upstream/main                                             # 已发布分支保留历史
 ```
 
 - **解冲突**：按第 2 节不变量和第 3 节清单**按语义重做挂接**，不要机械地保留旧代码。上游把
   被挂接的函数改名 / 拆分 / 移动时，把挂接点跟过去，并更新清单与检查脚本。
   `AGENTS.md` / `CLAUDE.md` 冲突时保留上游全部内容，再把本地入口段落加回去。
-- 解不了或拿不准：`git rebase --abort`，把冲突点和不确定之处告诉用户，不要硬合。
+- 解不了或拿不准：合并用 `git merge --abort`，rebase 用 `git rebase --abort`，把冲突点和不确定之处告诉用户，不要硬合。
 - 新增依赖或换 worktree 时按上游 `docs/dev-rules/environment-setup.md` 重新 `pnpm install`。
 
 同步后必须验证（全部在本仓根目录）：
@@ -115,7 +126,7 @@ pnpm test:unit:related
 
 - `check-cc-care-customization.mjs` 报「新增调用点」时，逐个判断它是否会让订阅会话绕开启动程序，
   需要就补挂接并把它加进脚本的已知清单。
-- 单测失败要和**未改动的 `origin/main`** 对比（`git stash` 或临时 worktree）后才能判定为既有故障。
+- 单测失败要和**未改动的 `upstream/main`** 对比（`git stash` 或临时 worktree）后才能判定为既有故障。
   截至 2026-11-01 已知既有失败：`askpass.native.test.ts`、`BillingPage.test.tsx`、
   `llamaCppDownloads.test.ts`；`botAutonomySettings.test.tsx` 在整仓并行下偶发失败；整仓运行
   偶发 vitest 进程 SIGSEGV，重跑即可。

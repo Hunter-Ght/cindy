@@ -4,7 +4,8 @@
 > `@AGENTS.md`，不要在两处重复维护规则。
 
 > **本地定制分支（`custom/cc-care-launcher`）**：本仓库在这台电脑上是带 CC Care 定制的本地分支，
-> 不推送、不提 PR。同步上游、解决冲突、修改定制代码、打包安装前，必须先读
+> 推送到个人 fork `Hunter-Ght/cindy`（`origin`），官方仓库 `makecindy/cindy` 为 `upstream`；
+> 不向官方仓库推送或提 PR。同步上游、解决冲突、修改定制代码、打包安装前，必须先读
 > `docs/local/cc-care-custom-branch.md`，并在同步后运行 `node scripts/local/check-cc-care-customization.mjs`。
 > 同步上游时若本段冲突：保留上游全部内容，再把本段加回这里。
 
