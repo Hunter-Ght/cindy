@@ -7,7 +7,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { sanitizeClaudeProjectKey } from '../claude-projects-fs.js';
-import { assertClaudeTranscriptBelongsToLauncher, type ClaudeSubscriptionLauncher } from '../subscription-launcher.js';
+import {
+  adaptClaudeFlagSettingsForLauncher,
+  assertClaudeTranscriptBelongsToLauncher,
+  type ClaudeSubscriptionLauncher,
+} from '../subscription-launcher.js';
 
 const SID = '11111111-2222-4333-8444-555555555555';
 let root = '';
@@ -54,5 +58,18 @@ describe('assertClaudeTranscriptBelongsToLauncher', () => {
 
   it('leaves a transcript found nowhere to the existing invalid-resume handling', async () => {
     await expect(assertClaudeTranscriptBelongsToLauncher(launcher(), SID, workDir)).resolves.toBeUndefined();
+  });
+});
+
+// CC Care 受管启动只要在 --settings 里看到 apiKeyHelper 键就拒绝启动(2026-11-01 实测:
+// 「Claude Code process exited with code 1」)。其余 flag settings 必须原样保留。
+describe('adaptClaudeFlagSettingsForLauncher', () => {
+  it('drops only the apiKeyHelper key', () => {
+    const settings = { apiKeyHelper: '', showThinkingSummaries: true, attribution: { commit: '', pr: '' }, fastMode: true };
+    expect(adaptClaudeFlagSettingsForLauncher(settings)).toEqual({
+      showThinkingSummaries: true,
+      attribution: { commit: '', pr: '' },
+      fastMode: true,
+    });
   });
 });

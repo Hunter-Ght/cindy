@@ -109,3 +109,16 @@ export async function assertClaudeTranscriptBelongsToLauncher(
     }
   }
 }
+
+/**
+ * 交给外部启动程序的 `--settings`:去掉 `apiKeyHelper` 覆盖。
+ *
+ * 上游恒把 `apiKeyHelper` 置空,防止用户级 helper 抢在订阅 OAuth 之前生效。CC Care 的受管
+ * 启动只要在任何设置层(含 `--settings`)看到这个键就拒绝启动(不看值),而它在启动前自己
+ * 检查了环境用户设置、项目及上级目录设置与系统托管设置,有 helper 一律拒绝 —— 上游这道防线
+ * 在 CC Care 下已由启动程序保证,去掉覆盖不会放宽保护。
+ */
+export function adaptClaudeFlagSettingsForLauncher<T extends { apiKeyHelper?: unknown }>(settings: T): T {
+  const { apiKeyHelper: _removed, ...rest } = settings;
+  return rest as T;
+}

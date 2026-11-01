@@ -182,6 +182,7 @@ import { repairForkedClaudeSessionJsonl, type RepairForkedClaudeJsonlResult } fr
 import { ensureClaudeTranscriptInWorkingDir } from './transcript-relocation.js';
 import { findClaudeSessionJsonl } from './claude-projects-fs.js';
 import {
+  adaptClaudeFlagSettingsForLauncher,
   assertClaudeTranscriptBelongsToLauncher,
   getClaudeSubscriptionLauncher,
   noteClaudeSubscriptionSession,
@@ -4546,7 +4547,8 @@ export class ClaudeCodeAgent extends BaseAgent {
           //  - autoMemoryEnabled / autoDream: memory 联动 (host 通过 runtimeConfig.memoryEnabled 或
           //    BaseAgent.setMemory 控制; this.memoryOverride === undefined 时不传, 让 SDK 走默认)
           // **同一对象远端分支也透传 (extraOptions.settings)**, 别在两边漂移。
-          settings: buildSettings(),
+          // 本地定制:CC Care 受管启动拒绝 --settings 里的 apiKeyHelper 键(见 subscription-launcher.ts)。
+          settings: subscriptionLauncher ? adaptClaudeFlagSettingsForLauncher(buildSettings()) : buildSettings(),
           allowDangerouslySkipPermissions:
             !reviewMode,
           stderr: vo.onStderrLine as ((line: string) => void) | undefined,

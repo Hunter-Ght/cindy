@@ -22,6 +22,7 @@ const HOOKS = [
   ['packages/maker-core/src/agents/claude-code/index.ts', 'env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir', 2, '按会话注入配置目录'],
   ['packages/maker-core/src/agents/claude-code/index.ts', 'noteClaudeSubscriptionSession(opts.sessionId', 1, '记录会话所属环境'],
   ['packages/maker-core/src/agents/claude-code/index.ts', 'await assertClaudeTranscriptBelongsToLauncher(', 1, 'resume 前归属核对'],
+  ['packages/maker-core/src/agents/claude-code/index.ts', 'adaptClaudeFlagSettingsForLauncher(buildSettings())', 1, '--settings 去掉 apiKeyHelper(CC Care 见键即拒)'],
   ['packages/maker-core/src/agents/claude-code/claude-projects-fs.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, 'projects 根优先启动程序目录'],
   ['packages/maker-core/src/agents/claude-code/fork-jsonl-repair.ts', 'claudeConfigDirCandidates()', 1, 'fork 修复跨目录查找'],
   ['packages/maker-core/src/agents/index.ts', "from './claude-code/subscription-launcher.js'", 1, '导出定制 API'],

@@ -36,13 +36,19 @@
 7. **定制逻辑放在自己的文件里，上游文件只留最小挂接点**，每处挂接都带 `本地定制` 注释，便于
    冲突时识别。新增挂接点必须同步更新第 3 节清单和 `scripts/local/check-cc-care-customization.mjs`。
 8. 旧版 CC Care（不写当前环境记录）下，环境跟随模块什么都不做；不要改成「没记录就关任务」。
+9. **交给 CC Care 的 `--settings` 里不能有 CC Care 拒绝的键**。CC Care 见到 `apiKeyHelper`、
+   `awsAuthRefresh`、`awsCredentialExport` 键（不论值）、受控 `env`（`ANTHROPIC_*`、
+   `CLAUDE_CONFIG_DIR` 等）、非 `claudeai` 的 `forceLoginMethod`、环境外的 `autoMemoryDirectory`
+   都会拒绝启动，报错只显示为「Claude Code process exited with code 1」。上游的
+   `apiKeyHelper: ''` 防线由 `adaptClaudeFlagSettingsForLauncher` 去掉（CC Care 自己检查所有设置层，
+   保护不变）。上游往 `flag-settings.ts` 加新键时，按 CC Care `runtime/auth-policy.cjs` 复核。
 
 ## 3. 挂接点清单
 
 | 文件 | 挂接内容 |
 | --- | --- |
 | `packages/maker-core/src/agents/claude-code/subscription-launcher.ts` | **自有**：启动程序登记、会话→环境 label、配置目录候选、旧任务归属核对 |
-| `packages/maker-core/src/agents/claude-code/index.ts` | 订阅会话与模型探测换启动程序、注入 `CLAUDE_CONFIG_DIR` 与启动程序 env、记录会话 label、resume 前归属核对 |
+| `packages/maker-core/src/agents/claude-code/index.ts` | 订阅会话与模型探测换启动程序、注入 `CLAUDE_CONFIG_DIR` 与启动程序 env、记录会话 label、resume 前归属核对、本地 `--settings` 去掉 `apiKeyHelper` |
 | `packages/maker-core/src/agents/claude-code/claude-projects-fs.ts` | `resolveClaudeProjectsRoot` 优先启动程序目录 |
 | `packages/maker-core/src/agents/claude-code/fork-jsonl-repair.ts` | 未指定根时在所有配置目录里找转录 |
 | `packages/maker-core/src/agents/index.ts` | 导出上述 API |
@@ -160,3 +166,17 @@ Xcode 提供；26.5 SDK 可以编译。装了完整 Xcode 后可去掉。
   Claude 专用出口、测试被外层会话污染。
 - CC Care 修改后要重建 `CC Care.app`、重新准备保护才会生效（见 cc_care 仓库文档）；其环境会话类
   测试在 Agent 沙箱里无法运行，需用户在自己的终端跑 `npm test`。
+
+## 8. 排查「Claude 订阅任务跑不起来」
+
+- 界面 / 远端只显示 `Claude Code process exited with code 1` 时，真正原因在 CC Care 的输出里：
+  `grep 'claude-code/stderr' ~/Library/Application\ Support/CindyGlobal/logs/main-$(date +%Y-%m-%d).log`，
+  找 `CAC:` 开头的行。常见：
+  - 「Claude 设置包含独立的认证方式或账号限制」→ `--settings` 或某个设置文件里有 `apiKeyHelper` 等键（不变量 9）。
+  - 「Guard has no fresh validated route」→ CC Care 后台没启动或出口未通过检查，到 CC Care 里处理。
+  - 「请先退出环境…再使用另一环境」→ 另一个环境还在用。
+  - 路径里带 `claude-subscription-launcher-unavailable` → 配置无效或 CC Care 没有运行中的环境。
+- 复现方式：用仓库里的 Agent SDK（`node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs`）以
+  `pathToClaudeCodeExecutable: ~/.cac/envs/<env>/bin/claude` 起一个最小 `query`，带上与 Cindy 相同的
+  `settings`，先清掉外层会话的 env（见第 7 节）。只用 `-p` 直接调启动程序**不会**带 `--settings`，
+  测不出这类问题（2026-11-01 就因此漏测）。
