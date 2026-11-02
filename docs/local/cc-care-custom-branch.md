@@ -74,7 +74,8 @@
 已知未覆盖：SkillHub 装到 `~/.claude/skills` 的技能 CC Care 环境看不到；「重置记忆」只清
 `~/.claude`；动态 workflow 的逐 agent 进度树（`workflow-progress/reader.ts`）只读 `~/.claude`，
 读不到时回退为 workflow 级卡片；CC Care paranoid 模式下启动时读不到订阅余量（任务跑过后由
-`rate_limit_event` 补上）。
+`rate_limit_event` 补上；CC Care 环境允许「用量查询等请求」即 `nonessentialTraffic: "allowed"` 后可直接读到，
+Cindy 侧无需改动）。
 
 ## 4. 与 CC Care 的约定
 
