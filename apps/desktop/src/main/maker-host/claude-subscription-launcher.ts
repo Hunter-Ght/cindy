@@ -274,6 +274,15 @@ export function getClaudeSubscriptionLauncherConfig(): ClaudeSubscriptionLaunche
   return value;
 }
 
+/**
+ * 是否启用了订阅启动程序(配置无效、CC Care 没有运行中的环境也算启用:这些情形要拒绝启动,
+ * 不能当成未启用退回上游行为)。auth-adapters 据此让未指定来源的 Anthropic 模型任务按订阅
+ * 会话启动,而不是退回 Cindy 网关 —— 那会用内置 CLI、绕开 CC Care。
+ */
+export function isClaudeSubscriptionLauncherEnabled(): boolean {
+  return ensureLoaded().kind !== 'off';
+}
+
 /** 是否处于「跟随 CC Care 当前环境」模式(只有该模式需要监听环境切换)。 */
 export function isFollowingCcCareActiveEnvironment(): boolean {
   const current = ensureLoaded();

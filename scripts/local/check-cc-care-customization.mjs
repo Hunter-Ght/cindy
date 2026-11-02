@@ -28,6 +28,8 @@ const HOOKS = [
   ['packages/maker-core/src/agents/index.ts', "from './claude-code/subscription-launcher.js'", 1, '导出定制 API'],
   ['apps/desktop/src/main/maker-host/claude-native-cli.ts', 'getClaudeSubscriptionLauncherConfig()', 3, 'CLI 路径 / 不下发代理桥 / env'],
   ['apps/desktop/src/main/maker-host/index.ts', 'getClaudeSubscriptionLauncherConfig();', 1, 'getMaker 登记启动程序'],
+  ['apps/desktop/src/main/maker-host/auth-adapters.ts', 'claudeSubscriptionLauncherClaimsModel(options?.model)', 2, '未指定来源的 Anthropic 模型不退回网关(getState + getAuthEnv)'],
+  ['apps/desktop/src/main/maker-host/__tests__/claudeAuthAdapterOAuthEnv.test.ts', "vi.mock('../claude-subscription-launcher.js'", 1, '测试 mock'],
   ['apps/desktop/src/main/maker-host/index.ts', 'startClaudeSubscriptionEnvFollow(', 1, '启动环境跟随'],
   ['apps/desktop/src/main/maker-host/index.ts', '_claudeSubscriptionEnvFollow?.stop()', 1, '停止环境跟随'],
   ['apps/desktop/src/main/maker-orchestration/claudeTranscriptAnchors.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, '转录目录候选'],

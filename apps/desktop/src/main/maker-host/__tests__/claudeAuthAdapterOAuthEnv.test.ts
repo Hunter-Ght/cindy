@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   retainPresentation: vi.fn(),
   readLoginCalls: [] as Array<{ maxAgeMs?: number } | undefined>,
   legacyMigrations: 0,
+  launcherEnabled: false,
 }));
 
 vi.mock('../provider-presentation-store.js', () => ({
@@ -75,6 +76,11 @@ vi.mock('../claude-native-connection.js', () => ({
 
 vi.mock('../claude-native-cli.js', () => ({
   claudeCliNetworkEnv: async () => ({ ...h.networkEnv }),
+}));
+
+// 本地定制:CC Care 启动程序开关(见 claude-subscription-launcher.ts)。
+vi.mock('../claude-subscription-launcher.js', () => ({
+  isClaudeSubscriptionLauncherEnabled: () => h.launcherEnabled,
 }));
 
 vi.mock('../claude-legacy-config-migration.js', () => ({
@@ -148,6 +154,7 @@ describe('DesktopClaudeAuthAdapter — Claude 订阅只经 CLI 自己的登录',
     h.retainPresentation.mockReset();
     h.readLoginCalls = [];
     h.legacyMigrations = 0;
+    h.launcherEnabled = false;
   });
 
   it('keeps the owner-scoped BYOK key readable when Cindy gateway access is disabled', async () => {
@@ -253,6 +260,29 @@ describe('DesktopClaudeAuthAdapter — Claude 订阅只经 CLI 自己的登录',
     expect(endToEnd.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:1');
     expect(endToEnd.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST).toBe('1');
     expect(endToEnd.ANTHROPIC_API_KEY).toBe(mod.CLAUDE_PROVIDER_AUTH_PLACEHOLDER_KEY);
+  });
+
+  // 本地定制:2026-11-01 新任务首条消息 providerId=null,有网关 key 就用内置 CLI 经 Cindy 网关
+  // 发出(网关只放行 Sonnet → Opus 403),绕开 CC Care。启用后 Anthropic 模型必须按订阅会话起。
+  it('CC Care 启用:未指定来源的 Anthropic 模型按订阅会话起,不递网关 key、不退回网关', async () => {
+    h.launcherEnabled = true;
+    const adapter = await makeAdapter();
+    for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5[1m]']) {
+      await expect(adapter.getState({ model })).resolves.toMatchObject({ authenticated: true, authSource: 'oauth' });
+      const env = await buildClaudeEnv(adapter, { endpoint: 'http://127.0.0.1:1' }, {
+        nativeCliAuth: true, authModel: model,
+      });
+      expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
+      for (const key of CREDENTIAL_KEYS) expect(env[key]).toBeUndefined();
+    }
+    // 非 Anthropic 模型与未传模型的调用方保持原行为。
+    await expect(adapter.getState({ model: 'glm-5' })).resolves.toEqual({ authenticated: true });
+    await expect(adapter.getAuthEnv()).resolves.toMatchObject({ ANTHROPIC_API_KEY: 'sk-xd-gateway' });
+    // 订阅未登录:拒绝启动,不改走网关。
+    h.nativeLogin = false;
+    await expect(adapter.getState({ model: 'claude-opus-5-5' })).resolves.toEqual({
+      authenticated: false, errorReason: 'no_oauth',
+    });
   });
 
   it('未指定来源 + 无网关 key + 未连订阅 → no_key', async () => {

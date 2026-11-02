@@ -43,6 +43,13 @@
    都会拒绝启动，报错只显示为「Claude Code process exited with code 1」。上游的
    `apiKeyHelper: ''` 防线由 `adaptClaudeFlagSettingsForLauncher` 去掉（CC Care 自己检查所有设置层，
    保护不变）。上游往 `flag-settings.ts` 加新键时，按 CC Care `runtime/auth-policy.cjs` 复核。
+10. **未指定来源的 Anthropic 模型任务也走 CC Care**。上游对 `providerId: null` 的任务是「有 Cindy
+   网关 key 就走网关」，新任务第一条消息常处在这种状态，会用内置 CLI 经 Cindy 网关发出，
+   绕开 CC Care（2026-11-01 实测：网关只放行 Sonnet，选 Opus 报「当前上游账号无权访问此模型」，
+   改模型触发重建并绑定 `anthropic` 后才走 CC Care）。`auth-adapters.ts` 的
+   `claudeSubscriptionLauncherClaimsModel` 让这类会话在 `getState` / `getAuthEnv` 两处都按订阅
+   会话处理，两处必须同序。非 Anthropic 模型、未传模型的调用方（host 直连兜底）不受影响；
+   用户显式选 Cindy AI 供应商（`gateway-key`）也不受影响。
 
 ## 3. 挂接点清单
 
@@ -57,11 +64,12 @@
 | `apps/desktop/src/main/maker-host/claude-subscription-env-follow.ts` | **自有**：环境切换后释放旧环境空闲任务、刷新登录态与模型 |
 | `apps/desktop/src/main/maker-host/claude-native-cli.ts` | 登录 / 登录态 / 用量用启动程序；启用时不下发代理桥；带上启动程序 env |
 | `apps/desktop/src/main/maker-host/index.ts` | `getMaker` 里登记启动程序、启动 / 停止环境跟随 |
+| `apps/desktop/src/main/maker-host/auth-adapters.ts` | 未指定来源的 Anthropic 模型按订阅会话处理，不退回 Cindy 网关（`getState` + `getAuthEnv`） |
 | `apps/desktop/src/main/maker-orchestration/claudeTranscriptAnchors.ts` | 转录目录候选加入启动程序目录 |
 | `apps/desktop/src/main/maker-host/claude-local-sessions.ts` | 导入本机会话时扫启动程序目录及其 `.claude.json` |
 | `apps/desktop/src/main/skillhub/usageIndexer.ts` | 技能用量统计加入启动程序目录 |
 | `apps/desktop/src/main/maker-ipc/register.ts` | `runtimeConfigDir` 用启动程序目录 |
-| 测试 | `claudeSubscriptionLauncher.test.ts`、`claudeSubscriptionEnvFollow.test.ts`、maker-core `__tests__/subscription-launcher.test.ts`；`claudeNativeCli.test.ts` 与 `claudeTranscriptRelocation.test.ts` 的 mock 补了定制导出 |
+| 测试 | `claudeSubscriptionLauncher.test.ts`、`claudeSubscriptionEnvFollow.test.ts`、maker-core `__tests__/subscription-launcher.test.ts`；`claudeNativeCli.test.ts` 与 `claudeTranscriptRelocation.test.ts` 的 mock 补了定制导出；`claudeAuthAdapterOAuthEnv.test.ts` 覆盖未指定来源走 CC Care |
 
 已知未覆盖：SkillHub 装到 `~/.claude/skills` 的技能 CC Care 环境看不到；「重置记忆」只清
 `~/.claude`；动态 workflow 的逐 agent 进度树（`workflow-progress/reader.ts`）只读 `~/.claude`，

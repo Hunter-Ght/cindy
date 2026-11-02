@@ -93,6 +93,8 @@ import { CLAUDE_PROVIDER_AUTH_PLACEHOLDER_KEY, isAnthropicWireModel } from './cl
 import { hasClaudeNativeLogin } from './claude-native-auth.js';
 import { disconnectClaudeNativeLogin, readClaudeNativeLogin } from './claude-native-connection.js';
 import { claudeCliNetworkEnv } from './claude-native-cli.js';
+// 本地定制:CC Care 启用时未指定来源的 Anthropic 模型不退回 Cindy 网关(见 claude-subscription-launcher.ts)。
+import { isClaudeSubscriptionLauncherEnabled } from './claude-subscription-launcher.js';
 import { ensureLegacyClaudeConfigMigrated } from './claude-legacy-config-migration.js';
 import { isAnthropicCompatProxyHandleReady } from './anthropic-compat-proxy-host.js';
 import { claudeUpstreamEndpoint } from './runtime-configs.js';
@@ -553,6 +555,15 @@ function claudeSubscriptionServesModel(model: string | undefined): boolean {
   return model === undefined || isAnthropicWireModel(model);
 }
 
+/**
+ * 本地定制:启用了订阅启动程序(CC Care)时,未指定来源、明确给出 Anthropic 模型的会话一律按
+ * 订阅会话处理,不再「有网关 key 就走网关」—— 否则新任务第一条消息会用内置 CLI 经 Cindy 网关
+ * 发出,绕开 CC Care。未传模型的调用方(host 直连兜底等)不受影响。
+ */
+function claudeSubscriptionLauncherClaimsModel(model: string | undefined): boolean {
+  return model !== undefined && isAnthropicWireModel(model) && isClaudeSubscriptionLauncherEnabled();
+}
+
 /** Claude AuthAdapter —— 只回鉴权 env, endpoint / behavior flag 走 runtime-configs.ts。 */
 export class DesktopClaudeAuthAdapter implements AuthAdapter {
   private readonly sharedSkillsPreparation = new PreparationCache(30_000);
@@ -680,6 +691,8 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
     // 未指定来源:有网关 key 就走网关(与未连订阅时一致);没有才交给本机 Claude Code
     // 登录(authSource 'oauth' → maker-core 按订阅会话起 CLI,见 env-builder nativeCliAuth)。
     // 非 Anthropic 模型不交给订阅:不带 authSource,仍经 proxy 隐式桥(getAuthEnv 给占位 key)。
+    // 本地定制:CC Care 启用时 Anthropic 模型与显式订阅会话同一判定,不退回网关。
+    if (claudeSubscriptionLauncherClaimsModel(options?.model)) return claudeNativeLoginState();
     if (readClaudeApiKey()) return { authenticated: true };
     const native = await claudeNativeLoginState();
     if (!native.authenticated) return { authenticated: false, errorReason: 'no_key' };
@@ -728,7 +741,8 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
     } else {
       // 未指定来源:与 getState 同序 —— 有网关 key 走网关;否则 Anthropic 模型交给本机
       // Claude Code 登录,其它模型经 proxy 隐式桥(只带占位 key,真实凭证由 proxy 注入)。
-      const apiKey = readClaudeApiKey();
+      // 本地定制:CC Care 启用时 Anthropic 模型与 getState 同序按订阅处理,不递网关 key。
+      const apiKey = claudeSubscriptionLauncherClaimsModel(options?.model) ? null : readClaudeApiKey();
       if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
       else if (hasClaudeNativeLogin()) {
         if (claudeSubscriptionServesModel(options?.model)) Object.assign(env, await claudeCliNetworkEnv());
