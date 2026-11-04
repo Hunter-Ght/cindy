@@ -66,7 +66,7 @@
 | `apps/desktop/src/main/maker-host/index.ts` | `getMaker` 里登记启动程序、启动 / 停止环境跟随 |
 | `apps/desktop/src/main/maker-host/auth-adapters.ts` | 未指定来源的 Anthropic 模型按订阅会话处理，不退回 Cindy 网关（`getState` + `getAuthEnv`） |
 | `apps/desktop/src/main/maker-orchestration/claudeTranscriptAnchors.ts` | 转录目录候选加入启动程序目录 |
-| `apps/desktop/src/main/maker-host/claude-local-sessions.ts` | 导入本机会话时扫启动程序目录及其 `.claude.json` |
+| `apps/desktop/src/main/session-import/sources/claude.ts` | 导入本机会话：列表扫启动程序目录 + 默认目录，导入副本写进启动程序目录 |
 | `apps/desktop/src/main/skillhub/usageIndexer.ts` | 技能用量统计加入启动程序目录 |
 | `apps/desktop/src/main/maker-ipc/register.ts` | `runtimeConfigDir` 用启动程序目录 |
 | 测试 | `claudeSubscriptionLauncher.test.ts`、`claudeSubscriptionEnvFollow.test.ts`、maker-core `__tests__/subscription-launcher.test.ts`；`claudeNativeCli.test.ts` 与 `claudeTranscriptRelocation.test.ts` 的 mock 补了定制导出；`claudeAuthAdapterOAuthEnv.test.ts` 覆盖未指定来源走 CC Care |

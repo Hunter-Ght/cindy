@@ -33,7 +33,7 @@ const HOOKS = [
   ['apps/desktop/src/main/maker-host/index.ts', 'startClaudeSubscriptionEnvFollow(', 1, '启动环境跟随'],
   ['apps/desktop/src/main/maker-host/index.ts', '_claudeSubscriptionEnvFollow?.stop()', 1, '停止环境跟随'],
   ['apps/desktop/src/main/maker-orchestration/claudeTranscriptAnchors.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, '转录目录候选'],
-  ['apps/desktop/src/main/maker-host/claude-local-sessions.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, '本机会话导入'],
+  ['apps/desktop/src/main/session-import/sources/claude.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, '本机会话导入'],
   ['apps/desktop/src/main/skillhub/usageIndexer.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, '技能用量统计'],
   ['apps/desktop/src/main/maker-ipc/register.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, 'runtimeConfigDir'],
   ['apps/desktop/src/main/maker-host/__tests__/claudeNativeCli.test.ts', "vi.mock('../claude-subscription-launcher.js'", 1, '测试 mock'],
@@ -53,9 +53,6 @@ const KNOWN = {
   "'.claude', 'projects'": {
     'apps/desktop/src/main/workflow-progress/reader.ts': 1, // 已知缺口:逐 agent 进度树,读不到时回退
     'packages/maker-core/src/agents/claude-code/index.ts': 2, // 记忆重置 / 统计,已知缺口
-  },
-  "'.claude.json'": {
-    'apps/desktop/src/main/maker-host/claude-local-sessions.ts': 2, // 已挂接(默认目录 + 启动程序目录)
   },
 };
 
