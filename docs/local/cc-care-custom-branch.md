@@ -164,14 +164,21 @@ cd ~/Documents/cindy/apps/desktop
 export PATH=~/.local/opt/node/bin:~/.local/bin:$PATH
 export CINDY_AUTH_REGION=global SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
 pnpm run package
+cd ~/Documents/cindy && node scripts/local/adhoc-sign-mac.mjs   # 必须:整包 ad-hoc 签名
 ```
+
+`pnpm run package` 不做 macOS 整包签名，产物只剩 Electron 自带的链接器签名（标识 `Electron`、
+`codesign --verify --strict` 失败）。不补签的话，系统设置里打开屏幕录制 / 辅助功能权限，Cindy
+仍然认不到（远程桌面开不了）。补签后 ad-hoc 签名按内容计算，每次重打包都要重新授权：先
+`tccutil reset ScreenCapture com.xd.cindy`、`tccutil reset Accessibility com.xd.cindy`，再在系统设置里重新打开。
 
 `SDKROOT` 原因：本机只有 Command Line Tools，macOS 27 SDK 的 SwiftUI `@State` 宏插件只随完整
 Xcode 提供；26.5 SDK 可以编译。装了完整 Xcode 后可去掉。
 
 用户打包完成后，Agent 负责：
 
-1. 核对 `out/Cindy-darwin-arm64/Cindy.app`：`CFBundleIdentifier` 为 `com.xd.cindy`、版本 `0.0.0`、
+1. 核对 `out/Cindy-darwin-arm64/Cindy.app`：`codesign -dv` 的 `Identifier=com.xd.cindy` 且
+   `codesign --verify --deep --strict` 通过（否则先跑补签脚本）；`CFBundleIdentifier` 为 `com.xd.cindy`、版本 `0.0.0`、
    `Contents/Resources/cindy-source.json` 的 commit 等于分支 HEAD、`app.asar` 含
    `claude-subscription-launcher.json`。
 2. 确认 Cindy 未运行（`pgrep -x Cindy`、数据库无进程占用），再备份数据库与设置文件到
