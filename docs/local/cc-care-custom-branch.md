@@ -53,8 +53,10 @@
 11. **Claude 账号由 CC Care 决定，不和上游「额外 Claude 账号」混用**（上游 2026-11 起支持在 Cindy
    里另登 Claude 订阅账号，每个账号一个 `CLAUDE_CONFIG_DIR`）。启用 CC Care 时：`claude-native-cli.ts`
    的 `cliEnv` 不下发额外账号目录；会话侧 CC Care 的 `configDir` 最后写入、覆盖额外账号目录。
-   额外账号的 fork 仍按其目录找转录，会和 CC Care 环境错位——用 CC Care 时不要在 Cindy 里添加
-   额外 Claude 账号，换账号在 CC Care 里切环境。
+   `subscription-accounts/ccCare.ts`：启用 CC Care 时 `readPool('anthropic')` 视为未配置（任务不调度
+   Cindy 自己登录的额外 Claude 账号，连接态 / 额度回到单账号路径，经启动程序读取），添加 / 登录 /
+   移出 / 调度命令拒绝（`SUBSCRIPTION_MANAGED_BY_CC_CARE`），设置页改为显示 CC Care 当前环境，
+   向导不显示「登录另一个账号」。Codex 账号池不受影响。账号联动的后续规划见第 9 节。
 
 ## 3. 挂接点清单
 
@@ -68,6 +70,8 @@
 | `apps/desktop/src/main/maker-host/claude-subscription-launcher.ts` | **自有**：读配置（固定 / `@active` / 自定义）、解析 CC Care 环境、失败即拒绝 |
 | `apps/desktop/src/main/maker-host/claude-subscription-env-follow.ts` | **自有**：环境切换后释放旧环境空闲任务、刷新登录态与模型 |
 | `apps/desktop/src/main/maker-host/claude-native-cli.ts` | 登录 / 登录态 / 用量用启动程序；启用时不下发代理桥；带上启动程序 env，且不下发额外账号的 `CLAUDE_CONFIG_DIR` |
+| `apps/desktop/src/main/subscription-accounts/ccCare.ts`（新文件）+ `store.ts` / `runtime.ts` 各一处 | Claude 账号池视为未配置；拒绝添加 / 登录；账号视图带 `ccCare` |
+| `apps/desktop/src/renderer/components/settings/CcCareClaudeAccounts.tsx`（新文件）+ `SubscriptionAccountsSection.tsx` / `SubscriptionSignInChoices.tsx` 各一处 | 设置页显示 CC Care 当前环境，隐藏添加 / 登录另一个账号（文案在新文件内，不改多语言文件） |
 | `apps/desktop/src/main/maker-host/index.ts` | `getMaker` 里登记启动程序、启动 / 停止环境跟随 |
 | `apps/desktop/src/main/maker-host/auth-adapters.ts` | 未指定来源的 Anthropic 模型按订阅会话处理，不退回 Cindy 网关（`getState` + `getAuthEnv`） |
 | `apps/desktop/src/main/maker-orchestration/claudeTranscriptAnchors.ts` | 转录目录候选加入启动程序目录 |
@@ -226,3 +230,14 @@ Xcode 提供；26.5 SDK 可以编译。装了完整 Xcode 后可去掉。
   （见 `~/Library/LaunchAgents/local.cac.guard.<env>.plist`），只更新源码或替换 App 不会切换；
   写记录要求快照 ≥ `98e12ef`（`preview.57` 之后的构建）。在 CC Care 里停止保护 → 重新准备并部署 →
   启动即可，Cindy 无需重启（2026-11-01 另一台 Mac 跑 `preview.55` 即此原因）。
+
+## 9. Claude 多账号联动（暂缓）
+
+2026-11-08 讨论后决定：只做不变量 11 的收口（不让 Cindy 自己登录 Claude 账号），其余暂缓。
+
+- 上游「供应商内的订阅账号」（`docs/product-rules/subscription-account-pools.md`）规定任务固定账号；
+  一个任务换到同一供应商的另一个账号继续（Claude、Codex 都一样）目前不支持。
+- CC Care 一台电脑同一时间只激活一个环境，一个环境 = 一个 Claude 账号；本机目前只有 `work`。
+- 暂缓的设想：CC Care 发布只读环境清单 → Cindy 账号列表按环境显示、任务绑定 `cc-care:<环境>` →
+  继续旧任务时提示切到所属环境 → 手动「换账号接力」（复制转录为新会话，受 CC Care 每环境开关约束，
+  会关联账号）。上游若加入「换账号继续」，优先接到上游入口上，不自建。

@@ -45,6 +45,8 @@ vi.mock('../../maker-host/codex-home-path.js', () => ({
   getCodexHome: () => '/existing-cindy/codex-home',
 }));
 vi.mock('node:fs/promises', () => ({ mkdir: vi.fn() }));
+// 本地定制:隔离本机是否装了 CC Care(见 ccCare.test.ts)。
+vi.mock('../ccCare.js', () => ({ applyCcCarePoolView: (view: unknown) => view, assertCcCareAllowsCommand: () => {} }));
 vi.mock('../store.js', () => ({
   readPool: (p: SubscriptionProvider) => h.pools[p] ?? null,
   defaultPool: () => ({

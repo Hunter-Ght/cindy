@@ -55,6 +55,8 @@ export interface SubscriptionPoolView {
   configured: boolean;
   strategy: ProviderGroupStrategy;
   accounts: SubscriptionAccountView[];
+  /** 本地定制:Claude 账号由 CC Care 环境决定(environment 为当前环境显示名)。 */
+  ccCare?: { environment: string };
 }
 export type SubscriptionAccountCommand =
   | { action: 'read'; providerId: SubscriptionProvider }

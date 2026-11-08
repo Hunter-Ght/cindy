@@ -37,6 +37,13 @@ const HOOKS = [
   ['apps/desktop/src/main/skillhub/usageIndexer.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, '技能用量统计'],
   ['apps/desktop/src/main/maker-ipc/register.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, 'runtimeConfigDir'],
   ['apps/desktop/src/main/maker-host/__tests__/claudeNativeCli.test.ts', "vi.mock('../claude-subscription-launcher.js'", 1, '测试 mock'],
+  ['apps/desktop/src/main/maker-host/claude-native-cli.ts', 'launcher ? launcher.env : options.configDir', 1, '不下发额外 Claude 账号目录'],
+  ['apps/desktop/src/main/subscription-accounts/store.ts', 'if (ccCareManagesAccounts(provider)) return null;', 1, 'Claude 账号池视为未配置'],
+  ['apps/desktop/src/main/subscription-accounts/runtime.ts', 'assertCcCareAllowsCommand(command);', 1, '拒绝添加 / 登录 Claude 账号'],
+  ['apps/desktop/src/main/subscription-accounts/runtime.ts', 'return applyCcCarePoolView({', 1, '账号视图显示 CC Care 环境'],
+  ['apps/desktop/src/renderer/components/settings/SubscriptionAccountsSection.tsx', 'if (view?.ccCare) return <CcCareClaudeAccounts', 1, '设置页账号区'],
+  ['apps/desktop/src/renderer/components/settings/SubscriptionSignInChoices.tsx', '!view?.ccCare &&', 1, '向导隐藏「登录另一个账号」'],
+  ['apps/desktop/src/shared/subscriptionAccounts.ts', 'ccCare?: { environment: string }', 1, '账号视图字段'],
 ];
 
 // 已逐个确认过的调用点:文件 → 次数。上游新增或次数变化时需要人工判断。

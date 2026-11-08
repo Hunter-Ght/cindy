@@ -45,6 +45,7 @@ import {
   readLegacyCodexAccount,
   loginLegacyCodexAccount,
 } from './nativeCli.js';
+import { applyCcCarePoolView, assertCcCareAllowsCommand } from './ccCare.js';
 
 type Usage = {
   claudeUsage?: ReturnType<typeof parseClaudeSdkRateLimitInfo>;
@@ -482,12 +483,13 @@ export async function readSubscriptionPool(
     }),
   );
   assertOwner(state);
-  return {
+  // 本地定制:CC Care 管理 Claude 账号时改为显示其当前环境(见 ccCare.ts)。
+  return applyCcCarePoolView({
     providerId: provider,
     configured: readPool(provider) !== null,
     strategy: pool.strategy,
     accounts,
-  };
+  });
 }
 
 export interface SubscriptionAccountLease {
@@ -644,6 +646,7 @@ export async function runSubscriptionAccountCommand(
   const state = currentRuntime();
   assertOwner(state);
   const provider = command.providerId;
+  assertCcCareAllowsCommand(command); // 本地定制:Claude 账号的添加 / 登录交给 CC Care。
   if (command.action === 'read') return readSubscriptionPool(provider);
   if (command.action === 'preview') return readSubscriptionPool(provider, true);
   if (command.action === 'cancel') {

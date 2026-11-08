@@ -15,6 +15,7 @@ import {
   type SubscriptionProvider,
 } from '../../shared/subscriptionAccounts.js';
 import { PROVIDER_GROUP_STRATEGIES } from '../../shared/providerGroup.js';
+import { ccCareManagesAccounts } from './ccCare.js';
 
 export const accountIdValid = (id: unknown): id is string =>
   typeof id === 'string' && (id === 'default' || /^cindy-[a-f0-9]{12}-[a-f0-9-]{36}$/.test(id));
@@ -88,6 +89,8 @@ export function accountDirectory(provider: SubscriptionProvider, id: string): st
   );
 }
 export function readPool(provider: SubscriptionProvider): SubscriptionPoolConfig | null {
+  // 本地定制:CC Care 管理 Claude 账号时视为未配置账号池,回到单账号(经启动程序)路径。
+  if (ccCareManagesAccounts(provider)) return null;
   store.invalidateIfChanged();
   return store.read().pools[provider] ?? null;
 }

@@ -3,6 +3,7 @@ import { UserRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { ccCareText } from './CcCareClaudeAccounts';
 import type {
   SubscriptionPoolView,
   SubscriptionProvider,
@@ -20,7 +21,7 @@ export function SubscriptionSignInChoices({
   onConnect: (target: 'default' | 'new') => void;
   onCancel: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [view, setView] = useState<SubscriptionPoolView | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -129,7 +130,8 @@ export function SubscriptionSignInChoices({
                 )}
               </Button>
             )}
-            {(detected || hasOtherAccounts || loading || failed) && (
+            {/* 本地定制:CC Care 管理 Claude 账号时只能使用它当前环境的账号。 */}
+            {!view?.ccCare && (detected || hasOtherAccounts || loading || failed) && (
               <Button
                 data-settings-search-action="Sign in to another account within this provider"
                 variant="secondary"
@@ -143,10 +145,16 @@ export function SubscriptionSignInChoices({
           </>
         )}
       </div>
-      {(detected || hasOtherAccounts) && (
+      {view?.ccCare ? (
         <p className="text-12 text-[var(--text-tertiary)]">
-          {t('subscriptionAccounts.signIn.keepExisting')}
+          {ccCareText(i18n?.resolvedLanguage ?? i18n?.language).note}
         </p>
+      ) : (
+        (detected || hasOtherAccounts) && (
+          <p className="text-12 text-[var(--text-tertiary)]">
+            {t('subscriptionAccounts.signIn.keepExisting')}
+          </p>
+        )
       )}
     </div>
   );

@@ -23,6 +23,7 @@ import type {
 import type { ProviderGroupStrategy } from '../../../shared/providerGroup';
 import { providersSettings } from './ProvidersSection.settings-search';
 import { useSettingDefinition } from './useSettingDefinition';
+import { CcCareClaudeAccounts } from './CcCareClaudeAccounts';
 
 const strategies: ProviderGroupStrategy[] = ['least', 'round', 'order', 'weight'];
 /** `defaultUsage` is the provider's existing usage card; it belongs to the CLI default account. */
@@ -98,6 +99,8 @@ export function SubscriptionAccountsSection({
       setBusy(false);
     }
   };
+  // 本地定制:CC Care 管理 Claude 账号时不显示上游账号池的添加 / 登录 / 调度。
+  if (view?.ccCare) return <CcCareClaudeAccounts view={view} defaultUsage={defaultUsage} />;
   return (
     <section
       {...accountSetting.anchorProps}
