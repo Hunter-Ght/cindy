@@ -50,6 +50,11 @@
    `claudeSubscriptionLauncherClaimsModel` 让这类会话在 `getState` / `getAuthEnv` 两处都按订阅
    会话处理，两处必须同序。非 Anthropic 模型、未传模型的调用方（host 直连兜底）不受影响；
    用户显式选 Cindy AI 供应商（`gateway-key`）也不受影响。
+11. **Claude 账号由 CC Care 决定，不和上游「额外 Claude 账号」混用**（上游 2026-11 起支持在 Cindy
+   里另登 Claude 订阅账号，每个账号一个 `CLAUDE_CONFIG_DIR`）。启用 CC Care 时：`claude-native-cli.ts`
+   的 `cliEnv` 不下发额外账号目录；会话侧 CC Care 的 `configDir` 最后写入、覆盖额外账号目录。
+   额外账号的 fork 仍按其目录找转录，会和 CC Care 环境错位——用 CC Care 时不要在 Cindy 里添加
+   额外 Claude 账号，换账号在 CC Care 里切环境。
 
 ## 3. 挂接点清单
 
@@ -62,7 +67,7 @@
 | `packages/maker-core/src/agents/index.ts` | 导出上述 API |
 | `apps/desktop/src/main/maker-host/claude-subscription-launcher.ts` | **自有**：读配置（固定 / `@active` / 自定义）、解析 CC Care 环境、失败即拒绝 |
 | `apps/desktop/src/main/maker-host/claude-subscription-env-follow.ts` | **自有**：环境切换后释放旧环境空闲任务、刷新登录态与模型 |
-| `apps/desktop/src/main/maker-host/claude-native-cli.ts` | 登录 / 登录态 / 用量用启动程序；启用时不下发代理桥；带上启动程序 env |
+| `apps/desktop/src/main/maker-host/claude-native-cli.ts` | 登录 / 登录态 / 用量用启动程序；启用时不下发代理桥；带上启动程序 env，且不下发额外账号的 `CLAUDE_CONFIG_DIR` |
 | `apps/desktop/src/main/maker-host/index.ts` | `getMaker` 里登记启动程序、启动 / 停止环境跟随 |
 | `apps/desktop/src/main/maker-host/auth-adapters.ts` | 未指定来源的 Anthropic 模型按订阅会话处理，不退回 Cindy 网关（`getState` + `getAuthEnv`） |
 | `apps/desktop/src/main/maker-orchestration/claudeTranscriptAnchors.ts` | 转录目录候选加入启动程序目录 |
