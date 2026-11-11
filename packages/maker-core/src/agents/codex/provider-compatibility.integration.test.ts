@@ -3,8 +3,9 @@
  * Runs the production CodexAgent against a private home and a loopback Responses
  * server; no accounts or external model calls. Existing fake-host tests cannot
  * detect a process default disagreeing with thread/start. Integration tier.
+ * Local legacy-openai regression: native 0.166.0 run 20.24s (15.17s test body).
  */
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
@@ -60,7 +61,7 @@ it.skipIf(!binaryPath)('keeps Cindy AI, subscription and custom routes usable ac
   if (!address || typeof address === 'string') throw new Error('No loopback address');
   const providers = ['cindy_gateway', 'cindy_codex', 'cindy_openai', 'cindy_custom_probe', 'cindy_summary'];
   const locations = new Map<string, string>();
-  const agent = new CodexAgent({
+  const createAgent = () => new CodexAgent({
     binaryPath: binaryPath!, logger, runtimeConfig: {}, isolateCodexAccountSessions: true,
     resolveModelContextLimit: () => exerciseCompaction ? 4096 : null,
     recordCodexThreadLocation: async (id, _home, rollout) => { if (rollout) locations.set(id, rollout); },
@@ -86,9 +87,11 @@ it.skipIf(!binaryPath)('keeps Cindy AI, subscription and custom routes usable ac
       }),
     },
   });
+  const agent = createAgent();
+  const legacyAgent = createAgent();
   const handles = new Set<AgentSessionHandle>();
-  const open = async (sessionId: string, providerId: string, model: string, resumeSessionId?: string) => {
-    const handle = await agent.startSession({ sessionId, providerId, model, resumeSessionId,
+  const open = async (sessionId: string, providerId: string, model: string, resumeSessionId?: string, owner = agent) => {
+    const handle = await owner.startSession({ sessionId, providerId, model, resumeSessionId,
       workingDir: work, permissionMode: 'bypassPermissions', makerMemoryEnabled: false });
     handles.add(handle);
     const events: AgentEvent[] = [];
@@ -125,6 +128,27 @@ it.skipIf(!binaryPath)('keeps Cindy AI, subscription and custom routes usable ac
     };
   };
   try {
+    // 本地回归:用户旧任务保存 openai identity,当前订阅路由为 cindy_openai。
+    // 现有跨来源矩阵没有内置 openai。通过真实 startSession/send 验证恢复保留历史,
+    // 已有记录不改写(原生同 thread 恢复可追加新记录);integration tier,仅临时目录与 loopback。
+    const legacy = await open('legacy-openai', 'openai', 'gpt-6.1-sol', undefined, legacyAgent);
+    const legacyId = await legacy.send('LEGACY_OPENAI_HISTORY', 'cindy_openai');
+    await legacy.close();
+    const legacyPath = locations.get(legacyId)!;
+    // 私有测试 fixture 模拟旧 rollout 的内置供应商元数据;不碰用户历史。
+    await legacyAgent.dispose();
+    const rows = (await readFile(legacyPath, 'utf8')).trimEnd().split('\n').map(line => JSON.parse(line));
+    const meta = rows.find(row => row.type === 'session_meta');
+    expect(meta.payload.model_provider).toBe('cindy_openai');
+    meta.payload.model_provider = 'openai';
+    await writeFile(legacyPath, rows.map(row => JSON.stringify(row).replaceAll('cindy_openai', 'openai')).join('\n') + '\n');
+    const legacySource = await readFile(legacyPath, 'utf8');
+    const migrated = await open('legacy-openai', 'openai', 'gpt-6.1-sol', legacyId);
+    const migratedId = await migrated.send('RESUME_LEGACY_OPENAI', 'cindy_openai', 'LEGACY_OPENAI_HISTORY');
+    await migrated.close();
+    const originalAfterResume = await readFile(legacyPath, 'utf8');
+    if (migratedId === legacyId) expect(originalAfterResume.startsWith(legacySource)).toBe(true);
+    else expect(originalAfterResume).toBe(legacySource);
     const cindy = await open('cindy', 'xd', 'codex/gpt-6.1-sol');
     const subscription = await open('subscription', 'openai', 'gpt-6.1-sol');
     const [original] = await Promise.all([
@@ -163,6 +187,7 @@ it.skipIf(!binaryPath)('keeps Cindy AI, subscription and custom routes usable ac
   } finally {
     for (const handle of handles) await handle.close();
     await agent.dispose();
+    await legacyAgent.dispose();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(root, { recursive: true, force: true });
   }

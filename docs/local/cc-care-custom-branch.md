@@ -43,6 +43,8 @@
    都会拒绝启动，报错只显示为「Claude Code process exited with code 1」。上游的
    `apiKeyHelper: ''` 防线由 `adaptClaudeFlagSettingsForLauncher` 去掉（CC Care 自己检查所有设置层，
    保护不变）。上游往 `flag-settings.ts` 加新键时，按 CC Care `runtime/auth-policy.cjs` 复核。
+   2026-11-11 起先在 `buildLocalSettings` 过滤，再走上游 `materializeClaudeFlagSettings` 的内联 / 文件交付，
+   不能为了保留过滤而绕开 Windows 长命令行修复；远端仍用未过滤的 `buildSettings`。
 10. **未指定来源的 Anthropic 模型任务也走 CC Care**。上游对 `providerId: null` 的任务是「有 Cindy
    网关 key 就走网关」，新任务第一条消息常处在这种状态，会用内置 CLI 经 Cindy 网关发出，
    绕开 CC Care（2026-11-01 实测：网关只放行 Sonnet，选 Opus 报「当前上游账号无权访问此模型」，
@@ -69,7 +71,7 @@
 | `packages/maker-core/src/agents/index.ts` | 导出上述 API |
 | `apps/desktop/src/main/maker-host/claude-subscription-launcher.ts` | **自有**：读配置（固定 / `@active` / 自定义）、解析 CC Care 环境、失败即拒绝 |
 | `apps/desktop/src/main/maker-host/claude-subscription-env-follow.ts` | **自有**：环境切换后释放旧环境空闲任务、刷新登录态与模型 |
-| `apps/desktop/src/main/maker-host/claude-native-cli.ts` | 登录 / 登录态 / 用量用启动程序；启用时不下发代理桥；带上启动程序 env，且不下发额外账号的 `CLAUDE_CONFIG_DIR` |
+| `apps/desktop/src/main/maker-host/claude-native-cli.desktop.ts` + `claude-native-cli.ts` | 桌面装配注入 `subscriptionLauncher` 端口；登录 / 登录态 / 用量用启动程序，不下发代理桥；带上启动程序 env，不下发额外账号的 `CLAUDE_CONFIG_DIR`；共用主体不依赖 Electron |
 | `apps/desktop/src/main/subscription-accounts/ccCare.ts`（新文件）+ `store.ts` / `runtime.ts` 各一处 | Claude 账号池视为未配置；拒绝添加 / 登录；账号视图带 `ccCare` |
 | `apps/desktop/src/renderer/components/settings/CcCareClaudeAccounts.tsx`（新文件）+ `SubscriptionAccountsSection.tsx` / `SubscriptionSignInChoices.tsx` 各一处 | 设置页显示 CC Care 当前环境，隐藏添加 / 登录另一个账号（文案在新文件内，不改多语言文件） |
 | `apps/desktop/src/main/maker-host/index.ts` | `getMaker` 里登记启动程序、启动 / 停止环境跟随 |
@@ -162,6 +164,25 @@ pnpm test:unit:related
   有新增迁移时，安装后数据库会升级，旧版 App 可能无法再打开这份数据——安装前必须先备份数据库，
   并告诉用户。
 - 提交：`git commit -s`，提交信息以 `feat(local):` / `fix(local):` 开头并写明是本地定制。
+
+### 2026-11-11 同步适配
+
+- 上游 `a6c2ff5535`；合并前回滚点 `backup/cc-care-20261111-before-upstream-sync`。
+- 上游把 CLI 逻辑拆为共用工厂与桌面装配，CC Care 经可选 `subscriptionLauncher` 端口注入；
+  配置目录读取改用两种启动器已有的 `getUserDataDir`，路径不变，不引入 Electron 依赖。
+- 保留账号池的旧供应商迁移、任务绑定查询和设置页目录入口；Claude 仍由 CC Care 管理。
+- Codex 的旧 `openai` 与当前 `cindy_openai` 兼容由上游原生恢复 / 结构化拒绝后的历史分叉处理。
+  隔离原生回归见 `provider-compatibility.integration.test.ts`，使用临时旧身份历史与本地假模型，
+  不读取真实账号；本机 Codex 0.166.0 原生回归通过（20.24 秒，含跨供应商与压缩场景），
+  最终用户旧任务仍需在重新打包安装后验证。
+- 验证：29 项挂接自检、maker-core / Desktop / Node Host 类型检查、152 项桌面定向测试、1054 项核心定向测试
+  （11 项原有跳过）、185 项 Host 测试、文档与 test-hygiene 检查通过。订阅账号设置页默认场景
+  Light / Dark 检查与截图目检通过；CC Care 专属卡片未做实机目检。
+- `pnpm test:unit:related` 因锁文件与测试配置变化扩大为全量，在脚本阶段 732 通过、1 失败、
+  2 跳过后停止：`restart-desktop-remote.test.mjs` 的 `whoami attributes a shared personal shell`
+  在未改动的 `upstream/main` 临时副本上同样返回空进程列表，已确认是上游现有失败。
+  未以此修改或跳过原测试；后续全量 workspace 单测未执行。
+- 与本机已安装包相比，数据库 SQL migration 和 journal 内容无差异；本次未安装、未修改用户数据。
 
 ## 6. 打包与安装流程
 

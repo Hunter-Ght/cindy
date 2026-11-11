@@ -32,7 +32,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { app } from 'electron';
+import { getUserDataDir } from '../userDataPath.js';
 
 import {
   setClaudeSubscriptionLauncher,
@@ -111,7 +111,7 @@ function defaultConfig(): Config {
 }
 
 function loadConfig(): Config {
-  const file = path.join(app.getPath('userData'), CLAUDE_SUBSCRIPTION_LAUNCHER_FILE);
+  const file = path.join(getUserDataDir(), CLAUDE_SUBSCRIPTION_LAUNCHER_FILE);
   let raw = '';
   try {
     raw = fs.readFileSync(file, 'utf8');
@@ -130,7 +130,7 @@ function loadConfig(): Config {
 /** 指向不存在路径的启动程序:启动时 spawn 失败,错误里带出原因。 */
 function unavailable(reason: string, configDir: string, peers: ClaudeSubscriptionLauncherPeer[] = []): ClaudeSubscriptionLauncher {
   return {
-    executable: path.join(app.getPath('userData'), 'claude-subscription-launcher-unavailable', reason),
+    executable: path.join(getUserDataDir(), 'claude-subscription-launcher-unavailable', reason),
     configDir,
     label: 'unavailable',
     displayName: '不可用',

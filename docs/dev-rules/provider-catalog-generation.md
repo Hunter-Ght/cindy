@@ -10,6 +10,12 @@
   推理、渠道报价与协议字段。Pi 专属请求兼容字段放在执行适配数据中。
 - 供应商 API 发现更新按连接保存，准确 ID 合并，不模糊匹配；无声明与明确 false 分开。
 - 渠道资料只借给地址和协议相符的连接，不能跨代理地址继承报价或协议承诺。
+- Anthropic 的 `supportsMidConvoEffort` 只随匹配的实际端点或合法账号端点模板继承；
+  修改地址后保留的预设 ID 不代表新中转声明了此能力，精确型号与代际兜底共用此边界。
+  Pi 宿主先按既有规则归一化无显式型号路由的 `/v1` 地址，再借用渠道能力；自定义请求
+  路径保持原义。陌生中转不带此开关，避免 Pi 将顶层 effort 固定为 high。
+  普通思考参数仍可补缺，原生显式配置不变。回归见 `modelGeneration.test.ts`、
+  `piNativeProviders.test.ts` 和真实 Pi 的 `pi-agent.integration.test.ts`（#9630）。
 - 生成过程输出可重现的数据文件与来源，校验完成才替换；离线继续使用最后有效目录。
 - 保留模型原始 ID、账号、Key、开关、用户覆盖；刷新不把默认值固化成用户设置。
 
@@ -52,6 +58,14 @@
 2026-10-30 只把 Pi 1.4.0 中 ID 含 `deepseek` 的行合并进来（`supplementalSources` 有记录），其它型号
 仍是 0.85.1 资料，整表同步随 Pi 版本升级另做。新地址与原供应商记录不同的行（OpenCode Zen/Go 已改到
 `/inference`）没有合并，否则会悄悄改掉已有连接的请求地址。
+
+2026-11-11：[#9863](https://github.com/makecindy/cindy/issues/9863) 的 Copilot Astra
+在官方个人端点拒绝 Chat Completions。`tools/pi/catalog-format.mjs` 对精确供应商、型号、
+地址及旧 API 做具名纠正为 Responses，随包条目同步；在线刷新与 bundle 导入共用该入口。
+按 [Pi #9253](https://github.com/earendil-works/pi/pull/9253) 的生成规则同时替换适配字段：
+禁止 `off` / `minimal`，保留 `low` 至 `max`，启用语法约束工具并移除旧 Chat 兼容标记。
+不把 `nativeApi` 当通用路由覆盖，不改用户显式接口、其他地址或已有任务的接口快照。
+回归覆盖生成、三引擎预设/ID-only 导入及 Pi 启动描述符；真实 Copilot 账号推理仍需验收。
 
 ## 用户实测后的补充验收
 

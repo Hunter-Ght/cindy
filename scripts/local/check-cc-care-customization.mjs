@@ -26,7 +26,8 @@ const HOOKS = [
   ['packages/maker-core/src/agents/claude-code/claude-projects-fs.ts', 'getClaudeSubscriptionLauncher()?.configDir', 1, 'projects 根优先启动程序目录'],
   ['packages/maker-core/src/agents/claude-code/fork-jsonl-repair.ts', 'claudeConfigDirCandidates()', 1, 'fork 修复跨目录查找'],
   ['packages/maker-core/src/agents/index.ts', "from './claude-code/subscription-launcher.js'", 1, '导出定制 API'],
-  ['apps/desktop/src/main/maker-host/claude-native-cli.ts', 'getClaudeSubscriptionLauncherConfig()', 3, 'CLI 路径 / 不下发代理桥 / env'],
+  ['apps/desktop/src/main/maker-host/claude-native-cli.desktop.ts', 'subscriptionLauncher: getClaudeSubscriptionLauncherConfig', 1, '桌面注入启动程序'],
+  ['apps/desktop/src/main/maker-host/claude-native-cli.ts', 'ports.subscriptionLauncher?.()', 3, 'CLI 路径 / 不下发代理桥 / env'],
   ['apps/desktop/src/main/maker-host/index.ts', 'getClaudeSubscriptionLauncherConfig();', 1, 'getMaker 登记启动程序'],
   ['apps/desktop/src/main/maker-host/auth-adapters.ts', 'claudeSubscriptionLauncherClaimsModel(options?.model)', 2, '未指定来源的 Anthropic 模型不退回网关(getState + getAuthEnv)'],
   ['apps/desktop/src/main/maker-host/__tests__/claudeAuthAdapterOAuthEnv.test.ts', "vi.mock('../claude-subscription-launcher.js'", 1, '测试 mock'],
@@ -51,7 +52,7 @@ const KNOWN = {
   "getReadyBinaryPath('claude-code')": {
     'apps/desktop/src/main/bootstrap-electron.ts': 1, // 注释
     'apps/desktop/src/main/maker-host/index.ts': 1, // getMaker:内置 CLI 给网关会话
-    'apps/desktop/src/main/maker-host/claude-native-cli.ts': 1, // 已挂接
+    'apps/desktop/src/main/maker-host/claude-native-cli.desktop.ts': 1, // 已挂接
   },
   'pathToClaudeCodeExecutable:': {
     'apps/desktop/src/main/maker-host/cc-manager-client.ts': 1, // 远端 SSH,不涉及

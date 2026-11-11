@@ -551,6 +551,15 @@ export function createComputerMcpServer(
     const sessionId = callContext?.sessionId;
     const parsedData = parsed.data as Record<string, unknown>;
 
+    if (name === 'scroll' && (parsedData.x !== undefined || parsedData.y !== undefined)) {
+      if (parsedData.x === undefined || parsedData.y === undefined || parsedData.window_id === undefined
+        || parsedData.element_index !== undefined || parsedData.element_token !== undefined) {
+        return textResult({ ok: false, errorCode: 'INVALID_ARGS', data: {
+          message: 'Scroll coordinates require both x and y and an exact window_id, without element_index or element_token. Use a point from the latest window screenshot.',
+        } }, true);
+      }
+    }
+
     // Resolve every local path before a guard reads it. In particular,
     // trajectory inspection must never follow a model-supplied path outside
     // the current task working directory. Keep the grant map on this call so
@@ -1722,7 +1731,7 @@ export function createComputerMcpServer(
   /**
    * 代输入 hint: a password field is the owner's to fill. Typing into one from
    * the agent would put the secret in the model's context, so refuse and point
-   * at ask_owner (kind fill). Runs after the freshness check resolved the target.
+   * at request_input_handoff. Runs after the freshness check resolved the target.
    */
   async function checkSecureField(
     name: ComputerMcpToolName,
@@ -1754,7 +1763,7 @@ export function createComputerMcpServer(
         data: {
           tool: name,
           message: 'This element is a password field. Cindy does not let the agent type into password fields.',
-          hint: 'Call ask_owner with kind="fill" and this pid and window as target so the owner fills it from their phone or another computer; leave the window as it is until it ends.',
+          hint: 'Call request_input_handoff with this pid and window as target so the owner fills it from their phone or another computer; leave the window as it is until it ends.',
         },
       },
       true,

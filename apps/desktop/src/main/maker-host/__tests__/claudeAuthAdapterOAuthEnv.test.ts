@@ -74,7 +74,7 @@ vi.mock('../claude-native-connection.js', () => ({
   },
 }));
 
-vi.mock('../claude-native-cli.js', () => ({
+vi.mock('../claude-native-cli.desktop.js', () => ({
   claudeCliNetworkEnv: async () => ({ ...h.networkEnv }),
 }));
 
@@ -111,6 +111,9 @@ vi.mock('../shared-global-skills.js', () => ({
   prepareSharedGlobalSkillLinks: async () => ({ warnings: [], persistentWarnings: [] }),
   prepareSharedProjectSkillLinks: async () => ({ warnings: [] }),
   sharedGlobalSkillLinksFingerprint: async () => 'test',
+  shouldProjectToClaudeSkills: async () => true,
+  markClaudeSessionObserved: () => {},
+  resetClaudeSessionObservedForTest: () => {},
   SHARED_GLOBAL_SKILL_SYNC_DISABLED_NOTICE: 'sync disabled',
 }));
 

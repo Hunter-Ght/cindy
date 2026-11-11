@@ -10,9 +10,7 @@ import { claudeConfigDirCandidates, getClaudeSubscriptionLauncher } from '@cindy
 
 const harness = vi.hoisted(() => ({ userData: '' }));
 
-vi.mock('electron', () => ({
-  app: { getPath: (name: string) => (name === 'userData' ? harness.userData : os.tmpdir()) },
-}));
+vi.mock('../../userDataPath.js', () => ({ getUserDataDir: () => harness.userData }));
 
 vi.mock('../../logger.js', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),

@@ -33,6 +33,8 @@ vi.mock('../nativeCli.js', () => ({
 vi.mock('../../maker-host/codex-home-path.js', () => ({ getCodexHome: () => '/codex-home' }));
 vi.mock('node:fs/promises', () => ({ mkdir: vi.fn() }));
 vi.mock('../store.js', () => ({
+  readLegacyCodexProviderId: () => undefined,
+  readLegacyCodexAccountId: () => undefined,
   readPool: (p: SubscriptionProvider) => h.pools[p] ?? null,
   defaultPool: () => ({ strategy: 'least', accounts: [{ id: 'default', paused: false, limit: 4, weight: 1 }] }),
   accountDirectory: (p: string, id: string) => `/home/.${p}-${id}`,
@@ -74,7 +76,7 @@ describe('CC Care manages Claude accounts', () => {
   });
 
   it('leaves Codex accounts and a disabled launcher on upstream behavior', async () => {
-    const codex = await runSubscriptionAccountCommand({ action: 'add', providerId: 'openai', loginKey: 'k' });
+    const codex = await runSubscriptionAccountCommand({ action: 'connect', providerId: 'openai', target: 'new', loginKey: 'k' });
     expect(codex.ccCare).toBeUndefined();
     expect(h.login).toHaveBeenCalledOnce();
     h.enabled = false;

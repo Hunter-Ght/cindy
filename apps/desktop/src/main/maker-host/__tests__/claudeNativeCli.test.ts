@@ -17,7 +17,11 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock('electron', () => ({ app: { isPackaged: true, getPath: () => '/tmp/cindy-test-user-data' } }));
-vi.mock('@cindy/maker-core', () => ({ cleanProcessEnv: () => ({ PATH: '/usr/bin' }) }));
+vi.mock('@cindy/maker-core', async () => {
+  // Keep the real status parser under test; only the ambient env is stubbed.
+  const actual = await vi.importActual<typeof import('@cindy/maker-core')>('@cindy/maker-core');
+  return { cleanProcessEnv: () => ({ PATH: '/usr/bin' }), parseClaudeCliLoginStatus: actual.parseClaudeCliLoginStatus };
+});
 vi.mock('../../agent-binaries/index.js', () => ({ getReadyBinaryPath: () => h.binary }));
 vi.mock('../../logger.js', () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -35,7 +39,7 @@ vi.mock('@cindy/anthropic-compat-proxy', async (original) => ({
 vi.mock('../claude-cli-proxy-bridge.js', () => ({ ensureClaudeCliProxyBridge: h.bridge }));
 // 本地定制的订阅启动程序未配置:保持上游行为。
 vi.mock('../claude-subscription-launcher.js', () => ({ getClaudeSubscriptionLauncherConfig: () => null }));
-vi.mock('node:child_process', () => ({ spawn: h.spawn }));
+vi.mock('node:child_process', () => ({ spawn: h.spawn, execFile: vi.fn() }));
 vi.mock('node:worker_threads', () => ({
   Worker: class extends EventEmitter {
     constructor(_file: string, { workerData }: { workerData: { binary: string; env: NodeJS.ProcessEnv } }) {
@@ -62,7 +66,7 @@ import {
   refreshClaudeCliLoginStatus,
   resetClaudeNativeCliForTest,
   runClaudeCliLogin,
-} from '../claude-native-cli.js';
+} from '../claude-native-cli.desktop.js';
 
 type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> };
 
