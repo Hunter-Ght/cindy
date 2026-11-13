@@ -1523,7 +1523,9 @@ export class ClaudeCodeAgent extends BaseAgent {
     // 启动时取一次:跟随模式下切换环境只影响之后新开的会话,本会话固定在这里。
     const subscriptionLauncher = nativeCliAuth ? getClaudeSubscriptionLauncher() : null;
     if (opts.sessionId) noteClaudeSubscriptionSession(opts.sessionId, subscriptionLauncher?.label);
-    const binaryPath = subscriptionLauncher?.executable ?? this.deps.binaryPath;
+    const binaryPath = opts.remoteHostId
+      ? undefined
+      : (subscriptionLauncher?.executable ?? this.deps.binaryPath);
     const providerRoutedModels = this.capabilities.availableModels.filter((model) =>
       isProviderRoutedModel(model.id),
     );
@@ -4533,6 +4535,8 @@ export class ClaudeCodeAgent extends BaseAgent {
           ...(managedPlugins?.roots ?? []),
           ...(controllerManagedSkills?.claudePluginRoots ?? []),
           ...(opts.botRuntimeProfile?.skillPolicy.ownSkillPluginRoots ?? []),
+          // Host Skills of this session (e.g. 群协作 for a group's Cindy task); local runtime only.
+          ...(opts.remoteHostId ? [] : (opts.hostSkills ?? []).map((skill) => skill.pluginRoot)),
         ])];
       // Bind the native request id before the first HTTP request, not after SDK init.
       // A fork keeps its resume source but must publish a new destination id.

@@ -50,9 +50,10 @@ const HOOKS = [
 // 已逐个确认过的调用点:文件 → 次数。上游新增或次数变化时需要人工判断。
 const KNOWN = {
   "getReadyBinaryPath('claude-code')": {
-    'apps/desktop/src/main/bootstrap-electron.ts': 1, // 注释
-    'apps/desktop/src/main/maker-host/index.ts': 1, // getMaker:内置 CLI 给网关会话
     'apps/desktop/src/main/maker-host/claude-native-cli.desktop.ts': 1, // 已挂接
+  },
+  "requireBinary('claude-code')": {
+    'apps/desktop/src/main/maker-host/index.ts': 1, // getMaker:延迟解析内置 CLI，订阅启动器优先
   },
   'pathToClaudeCodeExecutable:': {
     'apps/desktop/src/main/maker-host/cc-manager-client.ts': 1, // 远端 SSH,不涉及
