@@ -184,6 +184,20 @@ pnpm test:unit:related
   未以此修改或跳过原测试；后续全量 workspace 单测未执行。
 - 与本机已安装包相比，数据库 SQL migration 和 journal 内容无差异；本次未安装、未修改用户数据。
 
+### 2026-11-13 同步适配
+
+- 上游 `ec4b515bd7`；合并前回滚点 `backup/cc-care-20261113-071421`。
+- 订阅账号设置保留上游 Codex 重置额度入口，同时继续使用 CC Care Claude 账号卡；
+  账号池测试保留上游模型缓存读取与选路 mock，并保留 CC Care 的本机环境隔离。
+- 29 项定制自检、桌面定向测试 339 项、账号设置测试 17 项、核心定向测试 17 项、
+  Host 测试 282 项、设备连接测试 1287 项、中转测试 50 项和加入／重连互通验证通过。
+- maker-core、Desktop 与 Host 类型检查通过；Host 首次默认 4 GB 堆不足，使用与 Desktop 相同的
+  12 GB 检查配额重试通过。文档检查通过。
+- 订阅账号默认场景 Light / Dark 的 UI 检查与总览目检通过；未验证真实账号登录，
+  该场景未覆盖 CC Care 专属卡片。未执行整仓单测。
+- 与本机已安装包相比新增 SQL migration `0149_damp_wind_dancer.sql`，旧 SQL 无变化；
+  安装前需退出 App 并备份正式数据，不能用开发实例先升级正式数据库。
+
 ## 6. 打包与安装流程
 
 **打包必须由用户在系统 Terminal.app 里执行**（不要用 CC Care 打开的终端）：Agent 的 shell 运行在
