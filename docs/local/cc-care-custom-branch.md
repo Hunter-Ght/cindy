@@ -52,15 +52,12 @@
    `claudeSubscriptionLauncherClaimsModel` 让这类会话在 `getState` / `getAuthEnv` 两处都按订阅
    会话处理，两处必须同序。非 Anthropic 模型、未传模型的调用方（host 直连兜底）不受影响；
    用户显式选 Cindy AI 供应商（`gateway-key`）也不受影响。
-11. **Claude 账号由 CC Care 决定，不和上游「额外 Claude 账号」混用**（上游 2026-11 起支持在 Cindy
-   里另登 Claude 订阅账号，每个账号一个 `CLAUDE_CONFIG_DIR`）。启用 CC Care 时：`claude-native-cli.ts`
-   的 `cliEnv` 不下发额外账号目录；会话侧 CC Care 的 `configDir` 最后写入、覆盖额外账号目录。
-   `subscription-accounts/ccCare.ts`：启用 CC Care 时 `readPool('anthropic')` 视为未配置（任务不调度
-   Cindy 自己登录的额外 Claude 账号，连接态 / 额度回到单账号路径，经启动程序读取），添加 / 登录 /
-   移出 / 调度命令拒绝（`SUBSCRIPTION_MANAGED_BY_CC_CARE`），设置页改为显示 CC Care 当前环境，
-   向导不显示「登录另一个账号」。Codex 账号池不受影响。账号联动的后续规划见第 9 节。
-   上游新增独立订阅供应商后，命令门禁使用已解析的供应商类型，账号视图使用 `kind`（旧视图回退
-   `providerId`），不能只匹配内置 `anthropic` 名称。`create`、移动与合并同样受 CC Care 管理。
+11. **Claude 账号只来自 CC Care 环境：每个环境 = 一个 Claude 单独供应商**（2026-11-14，对接上游
+   「选账号就是选供应商」，详见第 9 节）。不变的底线：Cindy 不自己登录 Claude 账号（添加 / 登录 / 移出 /
+   新建 / 删除供应商一律 `SUBSCRIPTION_MANAGED_BY_CC_CARE`），不调度不经 CC Care 的目录
+   （`~/.claude-cindy-*` 从账号池里隐藏，数据保留）；任务绑定的环境账号只能由该环境的 `bin/claude`
+   启动，目录不属于任何环境时启动程序返回不可用，绝不落到当前环境 = 换了账号。命令门禁按已解析的
+   供应商类型判断，不只匹配内置 `anthropic`。Codex 账号池不受影响。
 
 ## 3. 挂接点清单
 
@@ -74,8 +71,10 @@
 | `apps/desktop/src/main/maker-host/claude-subscription-launcher.ts` | **自有**：读配置（固定 / `@active` / 自定义）、解析 CC Care 环境、失败即拒绝 |
 | `apps/desktop/src/main/maker-host/claude-subscription-env-follow.ts` | **自有**：环境切换后释放旧环境空闲任务、刷新登录态与模型 |
 | `apps/desktop/src/main/maker-host/claude-native-cli.desktop.ts` + `claude-native-cli.ts` | 桌面装配注入 `subscriptionLauncher` 端口；登录 / 登录态 / 用量用启动程序，不下发代理桥；带上启动程序 env，不下发额外账号的 `CLAUDE_CONFIG_DIR`；共用主体不依赖 Electron |
-| `apps/desktop/src/main/subscription-accounts/ccCare.ts`（新文件）+ `store.ts` / `runtime.ts` 各一处 | Claude 账号池视为未配置；拒绝添加 / 登录；账号视图带 `ccCare` |
-| `apps/desktop/src/renderer/components/settings/CcCareClaudeAccounts.tsx`（新文件）+ `SubscriptionAccountsSection.tsx` / `SubscriptionSignInChoices.tsx` 各一处 | 设置页显示 CC Care 当前环境，隐藏添加 / 登录另一个账号（文案在新文件内，不改多语言文件） |
+| `apps/desktop/src/main/subscription-accounts/ccCare.ts`（新文件）+ `store.ts` 两处 / `runtime.ts` 两处 | 环境账号（固定 ID）与单独供应商同步；账号池只留默认账号与环境账号；环境账号目录 = 环境配置目录；拒绝添加 / 登录 / 移出；账号视图带 `ccCare` |
+| `createDesktopProviderService.ts`（加载目录时）/ `maker-host/index.ts`（环境列表变化时）各一处 | 调 `syncCcCareClaudeProviders` |
+| maker-core `subscription-launcher.ts` 的 `setClaudeSubscriptionLauncherForConfigDir` + `claude-code/index.ts` 两处 | 会话 / 模型探测按绑定账号目录取该环境的启动程序 |
+| `apps/desktop/src/renderer/components/settings/CcCareClaudeAccounts.tsx`（新文件，只放说明文案）+ `SubscriptionAccountsSection.tsx` 四处 / `SubscriptionSignInChoices.tsx` 一处 | 沿用上游账号区，只隐藏添加 / 登录 / 重新登录 / 移出并加一行说明；向导隐藏「登录另一个账号」（文案在新文件内，不改多语言文件） |
 | `apps/desktop/src/main/maker-host/index.ts` | `getMaker` 里登记启动程序、启动 / 停止环境跟随 |
 | `apps/desktop/src/main/maker-host/auth-adapters.ts` | 未指定来源的 Anthropic 模型按订阅会话处理，不退回 Cindy 网关（`getState` + `getAuthEnv`） |
 | `apps/desktop/src/main/maker-orchestration/claudeTranscriptAnchors.ts` | 转录目录候选加入启动程序目录 |
@@ -100,6 +99,12 @@ Cindy 侧无需改动）。
 - `{ "ccCareEnv": "@active" }`：跟随 CC Care 当前环境（与默认相同）。
 - `{ "ccCareEnv": "work" }`：固定某个环境。`{ "enabled": false }`：即使装了 CC Care 也恢复上游行为。
 - 修改后重启 Cindy 生效。
+
+**多个环境同时运行（CC Care 0.36.11 / 核心 preview.75 起）**：使用内置专用代理的独立环境可以同时
+启动；每个 Guard 另写 `~/.cac/active-environments/<env>.json`（schema 1），旧的
+`active-environment.json` 指向最近启动的那个、它停掉后转给仍在运行的另一个。Cindy 的
+`readCcCareRunningEnvironments` 读这两处：只关闭**已停止**环境的空闲任务。旧版 CC Care 没有该目录，
+退回只看旧记录（同一时间一个环境）。真正的准入仍由环境启动入口负责。
 
 ## 4.1 分发到其它 Mac
 
@@ -162,6 +167,8 @@ pnpm test:unit:related
   截至 2026-11-01 已知既有失败：`askpass.native.test.ts`、`BillingPage.test.tsx`、
   `llamaCppDownloads.test.ts`；`botAutonomySettings.test.tsx` 在整仓并行下偶发失败；整仓运行
   偶发 vitest 进程 SIGSEGV，重跑即可。
+- 2026-11-14 起已知且与定制本身有关：`hostClaudeAuthAdapterParity.test.ts`（Node Host 没有 CC Care 启动程序，
+  与桌面端在「未指定来源的 Anthropic 模型」上判定不同，见不变量 10）。
 - 检查数据库迁移：对比 `apps/desktop/drizzle` 与当前安装版 `/Applications/Cindy.app/Contents/Resources/drizzle`。
   有新增迁移时，安装后数据库会升级，旧版 App 可能无法再打开这份数据——安装前必须先备份数据库，
   并告诉用户。
@@ -281,13 +288,20 @@ Xcode 提供；26.5 SDK 可以编译。装了完整 Xcode 后可去掉。
   写记录要求快照 ≥ `98e12ef`（`preview.57` 之后的构建）。在 CC Care 里停止保护 → 重新准备并部署 →
   启动即可，Cindy 无需重启（2026-11-01 另一台 Mac 跑 `preview.55` 即此原因）。
 
-## 9. Claude 多账号联动（暂缓）
+## 9. Claude 多账号联动：CC Care 环境 = Claude 单独供应商
 
-2026-11-08 讨论后决定：只做不变量 11 的收口（不让 Cindy 自己登录 Claude 账号），其余暂缓。
+2026-11-14 用户决定（取代 11-08 的「暂缓」）：上游 11-13 起「选账号就是选供应商」、改选同类另一个
+供应商时交接上下文；CC Care 0.36.11 起独立环境可以同时运行。两边接上：
 
-- 上游「供应商内的订阅账号」（`docs/product-rules/subscription-account-pools.md`）规定任务固定账号；
-  一个任务换到同一供应商的另一个账号继续（Claude、Codex 都一样）目前不支持。
-- CC Care 一台电脑同一时间只激活一个环境，一个环境 = 一个 Claude 账号；本机目前只有 `work`。
-- 暂缓的设想：CC Care 发布只读环境清单 → Cindy 账号列表按环境显示、任务绑定 `cc-care:<环境>` →
-  继续旧任务时提示切到所属环境 → 手动「换账号接力」（复制转录为新会话，受 CC Care 每环境开关约束，
-  会关联账号）。上游若加入「换账号继续」，优先接到上游入口上，不自建。
+- **映射**：每个可用环境（有 `managed.json` 与 `bin/claude`，残留目录不算）在 Anthropic 账号池里有一个
+  账号，ID 为 `cindy-<owner 前缀>-<由环境名推导的 UUID 形式>`（符合上游格式，旧客户端不会丢弃），
+  并放进自己的单独供应商「Claude · <环境显示名>」（`anthropic-sub-<8 位>`）。只增不删：环境删掉后
+  账号与供应商留着，绑定它的任务启动时由启动程序明确报错。
+- **内置 Claude 供应商**：默认账号继续跟随 CC Care 当前环境（旧任务、未指定供应商的任务照旧）。
+- **启动**：任务绑定账号 → 账号目录 → `ccCareLauncherForConfigDir` 找到环境 → 用该环境的 `bin/claude`。
+  登录态 / 额度读取同样按目录走（`getClaudeSubscriptionLauncherFor`）。
+- **换账号**：在任务里改选另一个环境的供应商 = 上游的主动换账号，下一次发送交接上下文（不复制原生
+  转录，但对话内容会交给新账号，两个账号会产生关联）。默认不把环境合进同一个供应商，因此不会自动换号；
+  用户自己合并后才按上游规则在供应商内换号。
+- **用户能做的**：合并 / 移动 / 拿出、暂停、并发上限、权重照上游；添加 / 登录 / 移出 / 删除供应商在 CC Care 里做。
+- 未验证：真实两个环境同时运行、两个真实账号之间的交接（本机目前只有 `work` 一个环境）。

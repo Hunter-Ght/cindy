@@ -1,9 +1,7 @@
-// 本地定制(CC Care,docs/local/cc-care-custom-branch.md 不变量 11):Cindy 自己登录的额外 Claude
-// 账号不经 CC Care 的出口与身份保护。启用启动程序时,账号命令入口必须拒绝添加 / 登录,账号视图
-// 只剩 CC Care 当前环境;Codex 账号池照旧。独立成文件,避免同步上游时与 runtime.test.ts 冲突。
-// 本次覆盖缺口:上游 create / 独立供应商入口可绕过只按 providerId 判断的门禁。
-// 最小输入:Claude create、独立 Claude provider 的 login;经 runSubscriptionAccountCommand
-// 验证 SUBSCRIPTION_MANAGED_BY_CC_CARE 且未调用登录。tier:unit,沿用本文件隔离账号存储。
+// 本地定制(CC Care,docs/local/cc-care-custom-branch.md 不变量 11):Claude 账号只来自 CC Care 环境,
+// 每个环境 = 一个 Claude 单独供应商。Cindy 自己登录的额外 Claude 账号不经 CC Care 的出口与身份
+// 保护:命令入口拒绝添加 / 登录 / 移出,账号池里只留默认账号与环境账号;Codex 照旧。
+// 独立成文件,避免同步上游时与 runtime.test.ts 冲突。tier:unit,账号存储与归属均为内存替身。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SubscriptionPoolConfig, SubscriptionProvider } from '../../../shared/subscriptionAccounts.js';
 
@@ -11,11 +9,14 @@ const h = vi.hoisted(() => ({
   enabled: true,
   pools: {} as Partial<Record<SubscriptionProvider, SubscriptionPoolConfig>>,
   login: vi.fn(),
+  envs: [{ name: 'work', displayName: 'work', configDir: '/cac/envs/work/.claude', executable: '/cac/envs/work/bin/claude' }],
+  created: new Map<string, string>(),
 }));
 vi.mock('../../maker-host/claude-subscription-launcher.js', () => ({
   isClaudeSubscriptionLauncherEnabled: () => h.enabled,
   getClaudeSubscriptionLauncherConfig: () =>
     h.enabled ? { executable: '/cac/envs/work/bin/claude', configDir: '/cac/envs/work/.claude', displayName: 'work' } : null,
+  listCcCareEnvironments: () => (h.enabled ? h.envs : []),
 }));
 vi.mock('../../appSessionState.js', () => ({
   activeOwnerScopeKey: () => 'owner-a:1',
@@ -54,7 +55,11 @@ vi.mock('../placement.js', () => ({
   accountProviderId: (kind: string) => kind,
   pinnedOwnAccount: () => undefined,
   readProviderStrategy: () => undefined,
-  accountOwnProvider: () => undefined,
+  accountOwnProvider: (_kind: string, id: string) => h.created.get(id),
+  createSubscriptionProvider: async (_kind: string, id: string, name: string) => {
+    h.created.set(id, `anthropic-sub-${h.created.size}`);
+    return name;
+  },
   discardUnusedSubscriptionAccountPlacement: async () => {},
   placeSubscriptionAccount: async () => {},
 }));
@@ -73,10 +78,12 @@ vi.mock('../store.js', () => ({
   },
 }));
 import { runSubscriptionAccountCommand } from '../runtime.js';
+import { ccCareAccountId, ccCareEnvironmentForAccount, filterCcCarePool, syncCcCareClaudeProviders } from '../ccCare.js';
 
 beforeEach(() => {
   h.enabled = true;
   h.pools = {};
+  h.created.clear();
   h.login.mockReset();
 });
 
@@ -89,6 +96,8 @@ describe('CC Care manages Claude accounts', () => {
       // 上游新增独立供应商和 create 入口；不变量 11 必须按类型生效。
       { action: 'create', providerId: 'anthropic', loginKey: 'k' },
       { action: 'login', providerId: 'anthropic-sub-12345678', accountId: 'cindy-owner-x', loginKey: 'k' },
+      { action: 'remove', providerId: 'anthropic-sub-12345678', accountId: 'cindy-owner-x' },
+      { action: 'remove-provider', providerId: 'anthropic-sub-12345678' },
     ] as const) {
       await expect(runSubscriptionAccountCommand(command)).rejects.toThrow('SUBSCRIPTION_MANAGED_BY_CC_CARE');
     }
@@ -102,9 +111,23 @@ describe('CC Care manages Claude accounts', () => {
     };
     const view = await runSubscriptionAccountCommand({ action: 'read', providerId: 'anthropic' });
     expect(view.ccCare).toEqual({ environment: 'work' });
-    expect(view.accounts.map((a) => [a.id, a.directory])).toEqual([['default', '/cac/envs/work/.claude']]);
+    expect(view.accounts.find((a) => a.id === 'default')?.directory).toBe('/cac/envs/work/.claude');
     const separate = await runSubscriptionAccountCommand({ action: 'read', providerId: 'anthropic-sub-12345678' });
     expect(separate.ccCare).toEqual({ environment: 'work' });
+  });
+
+  it('keeps only the default and CC Care environment accounts, each in its own provider', async () => {
+    const work = ccCareAccountId('work');
+    expect(work).toMatch(/^cindy-owner-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
+    expect(await syncCcCareClaudeProviders()).toBe(true);
+    expect(await syncCcCareClaudeProviders()).toBe(false);
+    expect(h.created.size).toBe(1);
+    const pool = { ...h.pools.anthropic!, accounts: [...h.pools.anthropic!.accounts, { id: 'cindy-owner-x', paused: false, limit: 4, weight: 1 }] };
+    expect(filterCcCarePool('anthropic', pool)?.accounts.map((a) => a.id)).toEqual(['default', work]);
+    expect(ccCareEnvironmentForAccount('anthropic', work)?.configDir).toBe('/cac/envs/work/.claude');
+    expect(ccCareEnvironmentForAccount('anthropic', 'cindy-owner-x')).toBeUndefined();
+    h.enabled = false;
+    expect(filterCcCarePool('anthropic', pool)).toBe(pool);
   });
 
   it('leaves Codex accounts and a disabled launcher on upstream behavior', async () => {

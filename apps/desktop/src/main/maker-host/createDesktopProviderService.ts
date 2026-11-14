@@ -1,4 +1,6 @@
 import { createXaiProviderTokenReader } from './xaiProviderToken.js';
+// 本地定制:CC Care 环境 → Claude 单独供应商。
+import { syncCcCareClaudeProviders } from '../subscription-accounts/ccCare.js';
 import { createCatalogCache } from './catalogCache.js';
 import { isModelContextLimitCustomized, readModelContextLimits } from './model-context-limit-store.js';
 import { requestCodexApiModelProbe } from './codex-api-model-capabilities.js';
@@ -730,6 +732,8 @@ export async function refreshCustomProvidersIntoCatalog(
       // The merged view stays as it was; the next refresh retries.
       log.warn('restoring pooled subscription accounts did not complete');
     }
+    // 本地定制:每个 CC Care 环境一个 Claude 单独供应商(见 subscription-accounts/ccCare.ts)。
+    await syncCcCareClaudeProviders().catch(err => log.warn('cc care claude providers sync failed', { err: String(err) }));
     if (!isCurrent()) return;
     publishSubscriptionPoolProviders();
     requestCodexApiModelProbe();

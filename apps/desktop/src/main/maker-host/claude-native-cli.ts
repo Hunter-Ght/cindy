@@ -37,7 +37,8 @@ export type ClaudeCliLoginResult =
 export function createClaudeNativeCli(ports: {
   binaryPath(): string | null;
   // 本地定制:桌面注入 CC Care;共用主体不依赖 Electron。
-  subscriptionLauncher?(): { executable: string; env?: Record<string, string> } | null;
+  // configDir:非默认订阅账号的目录;CC Care 下按目录取该环境的启动程序。
+  subscriptionLauncher?(configDir?: string): { executable: string; env?: Record<string, string> } | null;
   resolveOutboundProxy(url: string): string | null | undefined | Promise<string | null | undefined>;
   readStatus(options: { binary: string; env: NodeJS.ProcessEnv; timeoutMs: number }): Promise<ClaudeCliLoginStatus | null>;
 }) {
@@ -93,8 +94,8 @@ async function claudeCliNetworkEnv(): Promise<Record<string, string>> {
   return { HTTPS_PROXY: bridge, https_proxy: bridge, ...noProxy };
 }
 
-function cliBinaryPath(): string | null {
-  return ports.subscriptionLauncher?.()?.executable ?? ports.binaryPath();
+function cliBinaryPath(configDir?: string): string | null {
+  return ports.subscriptionLauncher?.(configDir)?.executable ?? ports.binaryPath();
 }
 
 /**
@@ -102,7 +103,7 @@ function cliBinaryPath(): string | null {
  * 子进程设置目录；process.env 的 CLAUDE_CONFIG_DIR 在 boot 期已被剥离。
  */
 async function cliEnv(options: { network: boolean; configDir?: string }): Promise<NodeJS.ProcessEnv> {
-  const launcher = ports.subscriptionLauncher?.();
+  const launcher = ports.subscriptionLauncher?.(options.configDir);
   return {
     ...cleanProcessEnv(),
     ...(options.network ? await claudeCliNetworkEnv() : {}),
@@ -114,9 +115,9 @@ async function cliEnv(options: { network: boolean; configDir?: string }): Promis
 
 function runCli(
   args: string[],
-  options: { env: NodeJS.ProcessEnv; timeoutMs: number; signal?: AbortSignal },
+  options: { env: NodeJS.ProcessEnv; timeoutMs: number; signal?: AbortSignal; configDir?: string },
 ): Promise<{ code: number | null; stdout: string; stderr: string; reason?: 'timeout' | 'cancelled' }> {
-  const binary = cliBinaryPath();
+  const binary = cliBinaryPath(options.configDir);
   if (!binary) return Promise.reject(new Error('claude cli unavailable'));
   return new Promise((resolve, reject) => {
     let child: ChildProcess;
@@ -180,7 +181,7 @@ function readProfileStatus(configDir: string, force = false): Promise<ClaudeCliL
     : entry.flight;
   if (!force && entry.value && Date.now() - entry.at < STATUS_FAILURE_BACKOFF_MS) return Promise.resolve(entry.value);
   const flight = (async () => {
-    const binary = cliBinaryPath();
+    const binary = cliBinaryPath(configDir);
     if (!binary) throw new Error('claude cli unavailable');
     const status = await ports.readStatus({
       binary, env: await cliEnv({ network: false, configDir }), timeoutMs: STATUS_TIMEOUT_MS,
@@ -292,7 +293,7 @@ const PLAN_USAGE_REQUEST_ID = 'cindy-plan-usage';
  * `rate_limits` 时抛错,由调用方退避。
  */
 async function readClaudeCliPlanUsage(configDir?: string): Promise<ClaudeCliPlanUsage | null> {
-  const binary = cliBinaryPath();
+  const binary = cliBinaryPath(configDir);
   if (!binary) throw new Error('claude cli unavailable');
   const env = await cliEnv({ network: true, configDir });
   // --setting-sources user:不读工作区的项目级设置(它们可改写上游 / 鉴权);
@@ -427,7 +428,7 @@ async function runClaudeCliLogin(
   if (signal.aborted) return { ok: false, reason: 'login_cancelled' };
   if (before.loggedIn && !options.renew) return { ok: true, status: before };
   if (before.notSubscription) return { ok: false, reason: 'not_a_subscription' };
-  if (!cliBinaryPath()) return { ok: false, reason: 'local_unavailable' };
+  if (!cliBinaryPath(configDir)) return { ok: false, reason: 'local_unavailable' };
   const expectedEmail = options.expectedEmail?.trim() || (options.renew ? before.email : undefined);
   try {
     // --email is only a browser hint. Verify the returned identity below as well.
@@ -435,6 +436,7 @@ async function runClaudeCliLogin(
       env: await cliEnv({ network: true, configDir }),
       timeoutMs: LOGIN_TIMEOUT_MS,
       signal,
+      configDir,
     });
     if (result.reason === 'cancelled') return { ok: false, reason: 'login_cancelled' };
     if (result.reason === 'timeout') return { ok: false, reason: 'timeout' };

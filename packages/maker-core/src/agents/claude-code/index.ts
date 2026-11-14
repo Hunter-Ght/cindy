@@ -1116,7 +1116,8 @@ export class ClaudeCodeAgent extends BaseAgent {
         subagentModel: null,
       });
       // 本地定制:订阅探测同样走外部启动程序(见 subscription-launcher.ts)。
-      const subscriptionLauncher = getClaudeSubscriptionLauncher();
+      // 本地定制:按任务绑定的订阅账号目录取启动程序(CC Care 环境 = 独立供应商)。
+      const subscriptionLauncher = getClaudeSubscriptionLauncher(nativeSubscriptionAccount && !nativeSubscriptionAccount.defaultProfile ? nativeSubscriptionAccount.configDir : undefined);
       if (subscriptionLauncher) {
         Object.assign(env, subscriptionLauncher.env);
         env.CLAUDE_CONFIG_DIR = subscriptionLauncher.configDir;
@@ -1521,7 +1522,9 @@ export class ClaudeCodeAgent extends BaseAgent {
     let mutableContextWindowBudget: number | null = opts.contextWindowBudget ?? null;
     // 本地定制:订阅会话改走外部启动程序(CC Care 等),网关 / 供应商会话保持内置 CLI。
     // 启动时取一次:跟随模式下切换环境只影响之后新开的会话,本会话固定在这里。
-    const subscriptionLauncher = nativeCliAuth ? getClaudeSubscriptionLauncher() : null;
+    const subscriptionLauncher = nativeCliAuth
+      ? getClaudeSubscriptionLauncher(nativeSubscriptionAccount && !nativeSubscriptionAccount.defaultProfile ? nativeSubscriptionAccount.configDir : undefined)
+      : null;
     if (opts.sessionId) noteClaudeSubscriptionSession(opts.sessionId, subscriptionLauncher?.label);
     const binaryPath = opts.remoteHostId
       ? undefined

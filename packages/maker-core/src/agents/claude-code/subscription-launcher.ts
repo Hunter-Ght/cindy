@@ -53,8 +53,24 @@ export function setClaudeSubscriptionLauncher(launcher: LauncherSource): void {
   source = launcher;
 }
 
-export function getClaudeSubscriptionLauncher(): ClaudeSubscriptionLauncher | null {
-  return typeof source === 'function' ? source() : source;
+/** 按账号目录取启动程序(如 CC Care 某个环境);host 未设置时只有全局启动程序。 */
+type LauncherForConfigDir = (configDir: string) => ClaudeSubscriptionLauncher | null;
+let forConfigDir: LauncherForConfigDir | null = null;
+
+export function setClaudeSubscriptionLauncherForConfigDir(resolve: LauncherForConfigDir | null): void {
+  forConfigDir = resolve;
+}
+
+/**
+ * 不传 configDir:全局启动程序(跟随 / 固定的那个环境)。传入任务绑定的订阅账号目录
+ * (非默认账号)时:启用启动程序后改由 host 按目录解析 —— 每个 CC Care 环境是一个独立
+ * 供应商的账号,任务固定用它所属环境的启动程序;不属于任何环境的目录由 host 返回不可用
+ * 的启动程序(启动失败),绝不落到当前环境 = 换了账号。
+ */
+export function getClaudeSubscriptionLauncher(configDir?: string): ClaudeSubscriptionLauncher | null {
+  const current = typeof source === 'function' ? source() : source;
+  if (!configDir || !current || !forConfigDir) return current;
+  return forConfigDir(configDir);
 }
 
 export function noteClaudeSubscriptionSession(sessionId: string, label: string | undefined): void {

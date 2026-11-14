@@ -62,7 +62,7 @@ import { shouldShowOpenPathError } from '../../../shared/openPathResult';
 import { isClassicalLocale, modernLocaleOf } from '../../../shared/locale';
 import { providersSettings } from './ProvidersSection.settings-search';
 import { useSettingDefinition } from './useSettingDefinition';
-import { CcCareClaudeAccounts } from './CcCareClaudeAccounts';
+import { CcCareAccountsNote } from './CcCareClaudeAccounts';
 import { codexResetScope } from '../../../shared/subscriptionAccounts';
 import { useCodexRateLimits } from '@/hooks/useCodexRateLimits';
 import { useCodexRateLimitReset } from '@/hooks/useCodexRateLimitReset';
@@ -255,8 +255,8 @@ export function SubscriptionAccountsSection({
       setBusy(false);
     }
   };
-  // 本地定制:CC Care 管理 Claude 账号时不显示上游账号池的添加 / 登录 / 调度。
-  if (view?.ccCare) return <CcCareClaudeAccounts view={view} defaultUsage={defaultUsage} />;
+  // 本地定制:CC Care 管理 Claude 账号时,添加 / 登录 / 移出交给 CC Care(其余照上游)。
+  const ccCare = !!view?.ccCare;
   const openDirectory = async (directory: string) => {
     const result = await window.electronAPI.openPath(directory);
     if (shouldShowOpenPathError(result)) toast.error(t('subscriptionAccounts.openDirectoryFailed'));
@@ -302,7 +302,7 @@ export function SubscriptionAccountsSection({
               {dashboard.label}
             </Button>
           )}
-          <Button
+          {!ccCare && <Button
             data-settings-search-action="Add a subscription account or cancel its pending sign-in"
             variant="secondary"
             size="sm"
@@ -317,9 +317,10 @@ export function SubscriptionAccountsSection({
           >
             {busy ? <Spinner size={13} /> : <Plus size={14} />}
             {login.current ? t('settings.providers.button.cancel') : t('subscriptionAccounts.add')}
-          </Button>
+          </Button>}
         </div>
       </div>
+      {ccCare && <CcCareAccountsNote />}
       {failed && (
         <p role="alert" className="mt-3 text-12 text-[var(--text-danger)]">
           {t('subscriptionAccounts.failed')}
@@ -493,7 +494,7 @@ export function SubscriptionAccountsSection({
                                 </span>
                               </Tip>
                             )}
-                            {kind === 'anthropic' && ((connected && expiring) || account.status === 'signed-out') && (
+                            {kind === 'anthropic' && !ccCare && ((connected && expiring) || account.status === 'signed-out') && (
                               <Button
                                 data-settings-search-action="Sign in again to this Claude account"
                                 variant="secondary"
@@ -590,7 +591,7 @@ export function SubscriptionAccountsSection({
                             </Tip>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem
+                            {!ccCare && <DropdownMenuItem
                               disabled={busy || account.running > 0}
                               onSelect={signIn}
                             >
@@ -601,7 +602,7 @@ export function SubscriptionAccountsSection({
                                   ? 'subscriptionAccounts.loginAgain'
                                   : 'subscriptionAccounts.login',
                               )}
-                            </DropdownMenuItem>
+                            </DropdownMenuItem>}
                             <DropdownMenuItem
                               title={account.directory}
                               onSelect={() => void openDirectory(account.directory)}
@@ -618,7 +619,7 @@ export function SubscriptionAccountsSection({
                                 onMove={(target) => void moveAccount({ id: account.id, name }, target)}
                               />
                             )}
-                            {account.id !== 'default' && (
+                            {account.id !== 'default' && !ccCare && (
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem

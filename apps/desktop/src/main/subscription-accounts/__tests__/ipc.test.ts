@@ -44,6 +44,12 @@ vi.mock('../../device-link/invoke-context.js', () => ({
 }));
 vi.mock('../../device-link/index.js', () => ({ broadcast: vi.fn() }));
 vi.mock('../../device-link/dispatch.desktop.js', () => ({ setRemoteSubscriptionPoolQuotaReader: vi.fn() }));
+// 本地定制:隔离本机是否装了 CC Care(见 ccCare.test.ts)。
+vi.mock('../../maker-host/claude-subscription-launcher.js', () => ({
+  isClaudeSubscriptionLauncherEnabled: () => false,
+  getClaudeSubscriptionLauncherConfig: () => null,
+  listCcCareEnvironments: () => [],
+}));
 vi.mock('../../appSessionState.js', () => ({
   activeOwnerScopeKey: () => `${h.owner}:${h.generation}`,
   getActiveAppSession: () => ({ dataOwnerId: h.owner }),

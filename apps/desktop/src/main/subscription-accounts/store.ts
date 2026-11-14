@@ -15,7 +15,7 @@ import {
   type SubscriptionProvider,
 } from '../../shared/subscriptionAccounts.js';
 import { PROVIDER_GROUP_STRATEGIES } from '../../shared/providerGroup.js';
-import { ccCareManagesAccounts } from './ccCare.js';
+import { ccCareEnvironmentForAccount, filterCcCarePool } from './ccCare.js';
 import { legacyCodexAccountHome } from '../maker-host/codex-account-path.js';
 import { getUserDataDir } from '../userDataPath.js';
 
@@ -116,16 +116,18 @@ export function accountDirectory(provider: SubscriptionProvider, id: string): st
     throw new Error('Subscription account is unavailable');
   const legacy = provider === 'openai' ? readLegacyCodexProviderId(id) : undefined;
   if (legacy) return legacyCodexAccountHome(getUserDataDir(), getActiveAppSession().dataOwnerId, legacy);
+  // 本地定制:CC Care 环境账号的目录就是该环境的配置目录。
+  const ccCareEnv = ccCareEnvironmentForAccount(provider, id);
+  if (ccCareEnv) return ccCareEnv.configDir;
   return path.join(
     homedir(),
     `.${provider === 'anthropic' ? 'claude' : 'codex'}${id === 'default' ? '' : `-${id}`}`,
   );
 }
 export function readPool(provider: SubscriptionProvider): SubscriptionPoolConfig | null {
-  // 本地定制:CC Care 管理 Claude 账号时视为未配置账号池,回到单账号(经启动程序)路径。
-  if (ccCareManagesAccounts(provider)) return null;
   store.invalidateIfChanged();
-  return store.read().pools[provider] ?? null;
+  // 本地定制:CC Care 管理 Claude 账号时只留默认账号与各环境账号(见 ccCare.ts)。
+  return filterCcCarePool(provider, store.read().pools[provider] ?? null);
 }
 /** OpenAI 池里从旧 Codex 连接导入的账号(旧连接 ID → 账号)；账号池文件读不了时返回 null，不当成没有。 */
 export function readOpenAiLegacyAccountsIfReadable(): Readonly<Record<string, string>> | null {

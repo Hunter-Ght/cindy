@@ -36,6 +36,7 @@ import { getUserDataDir } from '../userDataPath.js';
 
 import {
   setClaudeSubscriptionLauncher,
+  setClaudeSubscriptionLauncherForConfigDir,
   type ClaudeSubscriptionLauncher,
   type ClaudeSubscriptionLauncherPeer,
 } from '@cindy/maker-core';
@@ -159,10 +160,17 @@ function ccCarePeer(cacHome: string, name: string): ClaudeSubscriptionLauncherPe
   return { label: `cc-care:${name}`, displayName, configDir };
 }
 
+/** 真正可用的环境:有设置文件与启动入口(只剩 subscriptions 之类残留的目录不算)。 */
+function isCcCareEnvironment(cacHome: string, name: string): boolean {
+  const envDir = ccCareEnvDir(cacHome, name);
+  return fs.existsSync(path.join(envDir, 'managed.json')) && fs.existsSync(path.join(envDir, 'bin', 'claude'));
+}
+
 function ccCarePeers(cacHome: string): ClaudeSubscriptionLauncherPeer[] {
   let names: string[] = [];
   try {
-    names = fs.readdirSync(path.join(cacHome, 'envs')).filter((name) => ENV_NAME.test(name));
+    names = fs.readdirSync(path.join(cacHome, 'envs'))
+      .filter((name) => ENV_NAME.test(name) && isCcCareEnvironment(cacHome, name));
   } catch { /* 还没有环境 */ }
   return names.map((name) => ccCarePeer(cacHome, name));
 }
@@ -202,6 +210,33 @@ export function readCcCareActiveEnvironment(cacHome: string): string | null {
   }
 }
 
+/**
+ * CC Care 正在运行的环境:每个 Guard 自己的记录(`active-environments/<env>.json`,0.36.11 起
+ * 可以多个环境同时运行)加上旧的当前环境记录。读不了的记录当作仍在运行,不据此关闭任务。
+ */
+export function readCcCareRunningEnvironments(cacHome: string): Set<string> {
+  const running = new Set<string>();
+  const legacy = readCcCareActiveEnvironment(cacHome);
+  if (legacy) running.add(legacy);
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(path.join(cacHome, 'active-environments'));
+  } catch { /* 旧版 CC Care 没有这个目录 */ }
+  for (const file of names) {
+    const name = file.endsWith('.json') ? file.slice(0, -5) : '';
+    if (!ENV_NAME.test(name)) continue;
+    try {
+      const record = readJson(path.join(cacHome, 'active-environments', file));
+      if (!isRecord(record) || record.schema !== 1 || record.environment !== name) { running.add(name); continue; }
+      const { pid } = record;
+      if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0 || pidAlive(pid)) running.add(name);
+    } catch {
+      running.add(name);
+    }
+  }
+  return running;
+}
+
 function cacheKey(current: Config): string {
   if (current.kind !== 'cc-care' || current.environment !== ACTIVE) return current.kind;
   try {
@@ -238,6 +273,8 @@ function ensureLoaded(): Config {
     config = loadConfig();
     // 按需解析:跟随模式下每次读取都反映 CC Care 当前环境。
     setClaudeSubscriptionLauncher(config.kind === 'off' ? null : () => getClaudeSubscriptionLauncherConfig());
+    // 绑定了 CC Care 环境账号的任务按账号目录取该环境的启动程序(见 ccCareLauncherForConfigDir)。
+    setClaudeSubscriptionLauncherForConfigDir(config.kind === 'cc-care' ? ccCareLauncherForConfigDir : null);
     if (config.kind !== 'off') log.info('claude subscription launcher configured', { mode: describe(config) });
   }
   return config;
@@ -283,6 +320,71 @@ export function isClaudeSubscriptionLauncherEnabled(): boolean {
   return ensureLoaded().kind !== 'off';
 }
 
+export interface CcCareEnvironment {
+  /** 环境名(目录名),如 `work`。 */
+  name: string;
+  displayName: string;
+  configDir: string;
+  executable: string;
+}
+
+const ENVIRONMENTS_TTL_MS = 2_000;
+let environmentsCache: { at: number; value: CcCareEnvironment[] } | null = null;
+
+/**
+ * CC Care 模式下的全部可用环境;其它模式返回空。每个环境在 Cindy 里是一个 Claude 单独供应商。
+ * 账号池每次读取都会用到,短暂缓存,避免反复扫描环境目录。
+ */
+export function listCcCareEnvironments(): CcCareEnvironment[] {
+  const current = ensureLoaded();
+  if (current.kind !== 'cc-care') return [];
+  if (environmentsCache && Date.now() - environmentsCache.at < ENVIRONMENTS_TTL_MS) return environmentsCache.value;
+  const value = ccCarePeers(current.cacHome).map((peer) => {
+    const name = peer.label.slice('cc-care:'.length);
+    return {
+      name,
+      displayName: peer.displayName,
+      configDir: peer.configDir,
+      executable: path.join(ccCareEnvDir(current.cacHome, name), 'bin', 'claude'),
+    };
+  });
+  environmentsCache = { at: Date.now(), value };
+  return value;
+}
+
+function sameDir(a: string, b: string): boolean {
+  if (path.resolve(a) === path.resolve(b)) return true;
+  try {
+    return fs.realpathSync(a) === fs.realpathSync(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 订阅账号目录 → 该 CC Care 环境的启动程序。不属于任何环境的目录(例如 Cindy 以前自己
+ * 登录的 `~/.claude-cindy-*`)返回不可用:它们不经 CC Care 的出口与身份保护,也不能换成
+ * 当前环境(那等于换了账号)。是否已启动由启动程序自己的准入检查决定。
+ */
+export function ccCareLauncherForConfigDir(configDir: string): ClaudeSubscriptionLauncher {
+  const current = ensureLoaded();
+  if (current.kind === 'cc-care') {
+    const env = listCcCareEnvironments().find((item) => sameDir(item.configDir, configDir));
+    if (env) return ccCareLauncher(current.cacHome, env.name);
+  }
+  return unavailable(
+    '这个 Claude 账号不属于 CC Care 的任何环境,Cindy 不会绕开 CC Care 使用它。请在 CC Care 中为它建立环境',
+    configDir,
+    current.kind === 'cc-care' ? ccCarePeers(current.cacHome) : [],
+  );
+}
+
+/** 官方 CLI 读登录态 / 额度 / 登录用:不传目录 = 全局启动程序;CC Care 下按账号目录取环境。 */
+export function getClaudeSubscriptionLauncherFor(configDir?: string): ClaudeSubscriptionLauncher | null {
+  if (configDir && ensureLoaded().kind === 'cc-care') return ccCareLauncherForConfigDir(configDir);
+  return getClaudeSubscriptionLauncherConfig();
+}
+
 /** 是否处于「跟随 CC Care 当前环境」模式(只有该模式需要监听环境切换)。 */
 export function isFollowingCcCareActiveEnvironment(): boolean {
   const current = ensureLoaded();
@@ -300,6 +402,7 @@ export const __testing = {
     defaultCacHome = () => cacHome ?? path.join(os.homedir(), '.cac');
     config = null;
     cache = null;
+    environmentsCache = null;
     setClaudeSubscriptionLauncher(null);
   },
 };

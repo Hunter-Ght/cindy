@@ -16,6 +16,8 @@ vi.mock('../claude-subscription-launcher.js', () => ({
   ccCareHome: () => harness.home,
   isFollowingCcCareActiveEnvironment: () => harness.following,
   readCcCareActiveEnvironment: () => null,
+  readCcCareRunningEnvironments: () => new Set<string>(),
+  listCcCareEnvironments: () => [],
 }));
 
 import { startClaudeSubscriptionEnvFollow, type FollowableSession } from '../claude-subscription-env-follow.js';
@@ -61,6 +63,23 @@ describe('startClaudeSubscriptionEnvFollow', () => {
     await follower.tick();
     expect(onEnvironmentChanged).toHaveBeenCalledWith('home');
     expect(closeSession.mock.calls.map(([id]) => id)).toEqual(['idle-work']);
+  });
+
+  // 本地定制 2026-11:CC Care 0.36.11 起独立环境可以同时运行;仍在运行的环境的空闲任务不能关。
+  it('keeps idle tasks of every environment that is still running', async () => {
+    const sessions = [session('idle-work', 'cc-care:work'), session('idle-home', 'cc-care:home')];
+    const closeSession = vi.fn(async (_sessionId: string) => {});
+    let running = new Set(['home']);
+    const follower = startClaudeSubscriptionEnvFollow(
+      { listSessions: () => sessions, closeSession, onEnvironmentChanged: vi.fn(), readActive: () => 'work',
+        readRunning: () => new Set(running), recordExists: () => true },
+      { autoStart: false },
+    );
+    await follower.tick();
+    expect(closeSession).not.toHaveBeenCalled();
+    running = new Set();
+    await follower.tick();
+    expect(closeSession.mock.calls.map(([id]) => id)).toEqual(['idle-home']);
   });
 
   it('does nothing until CC Care has written an active-environment record', async () => {

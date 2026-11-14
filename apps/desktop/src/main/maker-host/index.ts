@@ -249,7 +249,10 @@ import {
   reloadActiveCatalogForEndpointChange,
   refreshDiscoveredCodexModels,
   setNativeProviderClaimListener,
+  publishSubscriptionPoolProviders,
 } from './createDesktopProviderService.js';
+// 本地定制:CC Care 环境 → Claude 单独供应商。
+import { syncCcCareClaudeProviders } from '../subscription-accounts/ccCare.js';
 import {
   clearAnthropicDiscoveredModels,
   requestAnthropicModelProbe,
@@ -3035,6 +3038,13 @@ export function getMaker(): Maker {
       onEnvironmentChanged: () => {
         void refreshClaudeCliLoginStatus({ force: true });
         requestAnthropicModelProbe();
+      },
+      onEnvironmentListChanged: () => {
+        void syncCcCareClaudeProviders().then((changed) => {
+          if (!changed) return;
+          publishSubscriptionPoolProviders();
+          refreshSelectableModelsAndBroadcast({ providerId: 'anthropic' });
+        }).catch(() => { /* 下次加载供应商目录时重试 */ });
       },
     });
   }

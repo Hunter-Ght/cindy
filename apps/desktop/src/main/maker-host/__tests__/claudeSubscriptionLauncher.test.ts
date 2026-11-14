@@ -20,6 +20,7 @@ import {
   __testing,
   CLAUDE_SUBSCRIPTION_LAUNCHER_FILE,
   getClaudeSubscriptionLauncherConfig,
+  listCcCareEnvironments,
 } from '../claude-subscription-launcher.js';
 
 let root = '';
@@ -34,6 +35,8 @@ function makeEnv(name: string, label?: string): string {
   fs.mkdirSync(envDir, { recursive: true });
   const configDir = path.join(root, `${name}-claude`);
   fs.writeFileSync(path.join(envDir, 'managed.json'), JSON.stringify({ configDir }));
+  fs.mkdirSync(path.join(envDir, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(envDir, 'bin', 'claude'), '#!/bin/sh\n', { mode: 0o755 });
   if (label) fs.writeFileSync(path.join(envDir, 'environment.json'), JSON.stringify({ label }));
   return configDir;
 }
@@ -87,6 +90,28 @@ describe('claude subscription launcher config', () => {
     });
     expect(getClaudeSubscriptionLauncher()).toEqual(launcher);
     expect(claudeConfigDirCandidates({})).toEqual([workDir, homeDir, path.join(os.homedir(), '.claude')]);
+  });
+
+  // 本地定制 2026-11:每个 CC Care 环境是一个 Claude 单独供应商。任务按绑定账号的目录取该环境的
+  // 启动程序;不属于任何环境的目录(Cindy 自己登录的账号)必须启动失败,不能落到当前环境。
+  it('launches a task bound to an environment account through that environment only', () => {
+    const workDir = makeEnv('work');
+    const homeDir = makeEnv('home', '家里');
+    fs.mkdirSync(path.join(cacHome, 'envs', 'sub_1', 'subscriptions'), { recursive: true });
+    markActive('work');
+    writeConfig(JSON.stringify({ ccCareEnv: '@active', cacHome }));
+    getClaudeSubscriptionLauncherConfig();
+
+    expect(listCcCareEnvironments().map((env) => env.name).sort()).toEqual(['home', 'work']);
+    expect(getClaudeSubscriptionLauncher(homeDir)).toMatchObject({
+      executable: path.join(cacHome, 'envs', 'home', 'bin', 'claude'),
+      configDir: homeDir,
+      label: 'cc-care:home',
+    });
+    expect(getClaudeSubscriptionLauncher()?.configDir).toBe(workDir);
+    const foreign = getClaudeSubscriptionLauncher(path.join(root, '.claude-cindy-x'));
+    expect(foreign?.label).toBe('unavailable');
+    expect(fs.existsSync(foreign!.executable)).toBe(false);
   });
 
   it('follows the environment CC Care marks active', () => {

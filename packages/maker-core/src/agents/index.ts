@@ -41,6 +41,7 @@ export {
 // 本地定制:订阅会话的外部启动程序(CC Care 等),见 subscription-launcher.ts
 export {
   setClaudeSubscriptionLauncher,
+  setClaudeSubscriptionLauncherForConfigDir,
   getClaudeSubscriptionLauncher,
   claudeConfigDirCandidates,
   claudeSubscriptionSessionLabel,
