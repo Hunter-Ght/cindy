@@ -11,18 +11,17 @@ import {
 import type {
   SubscriptionAccountCommand,
   SubscriptionPoolView,
-  SubscriptionProvider,
 } from '../../shared/subscriptionAccounts.js';
 
 export const CC_CARE_MANAGED_ERROR = 'SUBSCRIPTION_MANAGED_BY_CC_CARE';
 
-export function ccCareManagesAccounts(provider: SubscriptionProvider): boolean {
+export function ccCareManagesAccounts(provider: string): boolean {
   return provider === 'anthropic' && isClaudeSubscriptionLauncherEnabled();
 }
 
 /** 只放行只读与「使用检测到的当前账号」;添加、登录、移出、调度设置交给 CC Care。 */
-export function assertCcCareAllowsCommand(command: SubscriptionAccountCommand): void {
-  if (!ccCareManagesAccounts(command.providerId)) return;
+export function assertCcCareAllowsCommand(command: SubscriptionAccountCommand, kind: string = command.providerId): void {
+  if (!ccCareManagesAccounts(kind)) return;
   if (['read', 'preview', 'cancel'].includes(command.action)) return;
   if (command.action === 'connect' && command.target === 'default') return;
   throw new Error(CC_CARE_MANAGED_ERROR);
@@ -30,7 +29,7 @@ export function assertCcCareAllowsCommand(command: SubscriptionAccountCommand): 
 
 /** 只保留默认行(它的登录态与额度经启动程序读取,即 CC Care 当前环境)。 */
 export function applyCcCarePoolView(view: SubscriptionPoolView): SubscriptionPoolView {
-  if (!ccCareManagesAccounts(view.providerId)) return view;
+  if (!ccCareManagesAccounts(view.kind ?? view.providerId)) return view;
   const launcher = getClaudeSubscriptionLauncherConfig();
   return {
     ...view,
