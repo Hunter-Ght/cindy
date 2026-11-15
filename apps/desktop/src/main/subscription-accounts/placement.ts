@@ -149,6 +149,13 @@ export function readCreatedSubscriptionProviders(): Readonly<Record<string, Crea
   return file.read().providers ?? {};
 }
 
+/** Preserve an already-published list on an unreadable file; missing or valid empty files clear it. */
+export function readCreatedSubscriptionProvidersIfReadable(): Readonly<Record<string, CreatedSubscriptionProvider>> | null {
+  file.invalidateIfChanged();
+  if (file.isUnreadable()) return null;
+  return file.read().providers ?? {};
+}
+
 /** A provider that owns subscription accounts, with the pool kind its accounts live in. */
 export interface SubscriptionPoolProviderRef {
   kind: SubscriptionProvider;
@@ -306,6 +313,19 @@ export function readOpenAiMergedLegacyAccountsIfReadable(): Readonly<Record<stri
   return Object.fromEntries(
     Object.entries(aliases).filter(([providerId, accountId]) => accountProviderId('openai', accountId) !== providerId),
   );
+}
+
+/** Only current members of actually shared pools inherit the pool's revert grant.
+ * Historical aliases survive a split for saved tasks; they are not sharing intent.
+ */
+export function readSharedOpenAiLegacyAccountsIfReadable(sharedProviders: ReadonlySet<string>): Readonly<Record<string, string>> | null {
+  const aliases = readOpenAiLegacyAccountsIfReadable();
+  file.invalidateIfChanged();
+  if (!aliases || file.isUnreadable()) return null;
+  const members = new Set(readPool('openai')?.accounts.map(account => account.id));
+  return Object.fromEntries(Object.entries(aliases).filter(([providerId, accountId]) =>
+    members.has(accountId) && accountProviderId('openai', accountId) !== providerId
+    && sharedProviders.has(accountProviderId('openai', accountId))));
 }
 
 /**
