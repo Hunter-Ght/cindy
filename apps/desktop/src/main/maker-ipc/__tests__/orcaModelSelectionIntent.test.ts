@@ -14,7 +14,7 @@ import { createScheduledModelScope, type ScheduledModelSelection } from '../sche
 
 // Execute the actual picker admission branches (local and agent-device), with
 // everything after admission represented by applyLive. No Electron bootstrap.
-const source = ts.createSourceFile('register.ts', readFileSync(new URL('../register.ts', import.meta.url), 'utf8'),
+let source = ts.createSourceFile('register.ts', readFileSync(new URL('../register.ts', import.meta.url), 'utf8'),
   ts.ScriptTarget.Latest, true);
 const branches: string[] = [];
 const confirmationChecks: string[] = [];
@@ -85,6 +85,11 @@ function visit(node: ts.Node) {
   }
   ts.forEachChild(node, visit);
 }
+visit(source);
+// handleSetModel moved verbatim into sessionRuntimeSelectionApply.ts. Walking it after register.ts
+// collects its branches in the order they had there (everything else stays before its old place).
+source = ts.createSourceFile('sessionRuntimeSelectionApply.ts',
+  readFileSync(new URL('../sessionRuntimeSelectionApply.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 visit(source);
 const remoteLead = { leadDeviceId: 'lead-device', leadSessionId: 'lead-session', workerLabel: 'worker' };
 const orcaIdentities = [
@@ -609,7 +614,7 @@ describe('Orca model-only picker intent admission', () => {
         internalOptions, runtimeStatus, sessionId: 's1', model: 'new',
         targetProviderId: 'provider', effectiveProviderId: 'provider', currentProviderId: 'old-provider',
         agentKind: 'codex', dbToMakerAgentKind: (kind: string) => kind,
-        targetEffort: 'high', targetFastMode: true, targetContextWindow: undefined,
+        targetEffort: 'high', targetFastMode: true, targetContextWindow: onOtherDevice ? 200000 : undefined as number | undefined,
         confirmedContextWindow: 200000 as number | undefined,
         atomicSelection: { effort: 'high', fastMode: true },
         assertRuntimeOwnerCurrent: vi.fn(), assertSharedTaskCurrent: { admit: vi.fn() },
@@ -632,13 +637,26 @@ describe('Orca model-only picker intent admission', () => {
       expect(bindings.markRemoteSettingPersistedInsideHandler).toHaveBeenCalledOnce();
       expect(applyLive).not.toHaveBeenCalled();
       expect(runtimeStatus.model).toBe('old');
-      if (!onOtherDevice) {
+      {
+        // PR #11071: remote restaging lost an already confirmed small window.
+        // The existing unit matrix only checked receipt inheritance locally.
         expect(pending.get('s1').confirmedContextWindow).toBe(200000);
         // Axis-only restaging retains this route's receipt; a different route
         // must not inherit acknowledgement from the previous selection.
         bindings.confirmedContextWindow = undefined;
+        bindings.targetContextWindow = undefined;
         await run();
         expect(pending.get('s1').confirmedContextWindow).toBe(200000);
+        const confirmedIntent = pending.get('s1');
+        for (const changedTarget of [
+          { providerId: 'another-provider' }, { targetAgentKind: 'pi' },
+          ...(onOtherDevice ? [{ targetAgentDeviceId: 'another-device' }] : []),
+        ]) {
+          pending.set('s1', { ...confirmedIntent, ...changedTarget });
+          await run();
+          expect(pending.get('s1')).not.toHaveProperty('confirmedContextWindow');
+        }
+        pending.set('s1', confirmedIntent);
         bindings.model = 'another-model';
         await run();
         expect(pending.get('s1')).not.toHaveProperty('confirmedContextWindow');
@@ -664,7 +682,7 @@ describe('Orca model-only picker intent admission', () => {
       expect(pending.has('s1')).toBe(false);
       await applyPendingAgentSwitchIfIdle(deps, 's1');
       expect(applyLive).toHaveBeenCalledTimes(1);
-      expect(changed).toHaveBeenCalledTimes(onOtherDevice ? 1 : 3);
+      expect(changed).toHaveBeenCalledTimes(onOtherDevice ? 6 : 5);
     }
   });
 

@@ -36,6 +36,7 @@ import { RecentMessageHistories, MessageHistoryOverlay } from '@/session/RecentM
 import { rememberRecentTask } from '@/session/recentTasks';
 import { SystemNavigationBack, useSystemNavigationBack } from '@/platform/chrome/SystemNavigationBack';
 import { floatingTopRow, keyboardControlRegion, sharedStatusRowDrawerTop, sharedStatusRowTrailingReserve, type LayoutRect } from '@/platform/windowGeometry';
+import { sessionNavigationTitleMaxWidth } from '@/platform/chrome/navigationTitleWidth';
 import { useAdaptiveWindow, useAdaptiveWindowDimensions, PaneViewportProvider } from '@/platform/AdaptiveWindowContext';
 import { useSessionHeaderHeight } from '@/session/useSessionHeaderHeight';
 import { useDoubleTap } from '@/session/useDoubleTap';
@@ -331,6 +332,8 @@ import { OrcaTeamPanelView, OrcaWorkerFormView } from '@/session/ContextSheetCol
 import { OrcaWorkerDirectoryPicker } from '@/session/OrcaWorkerDirectoryPicker';
 import { useSessionOrcaCollab } from '@/session/useSessionOrcaCollab';
 import { orcaWorkerProvidersForLead, subscribeOrcaStartFailure, takeOrcaStartFailure } from '@/session/orcaTeam';
+import { ContextSheetMediaAddButton, useContextSheetMediaSelection } from '@/session/ContextSheetMediaSelection';
+import { contextSheetMediaUploadCandidates } from '@/session/contextSheetMediaUpload';
 import { RecentPhotosStrip } from '@/session/ContextSheetMediaViews';
 import { ContextSheetGoalView, goalStatusLabel } from '@/session/ContextSheetGoalView';
 import { parseGoalLimitsRouteParam } from '@/session/goalLimitsRouteParam';
@@ -360,7 +363,6 @@ import type { MobileMessageGalleryImage } from '@/session/messageGallery';
 import { canBrowsePhotoLibraryDirectly } from '@/session/photoLibraryPolicy';
 import {
   prefetchContextSheetMediaAssets,
-  resolveContextSheetMediaAssetForUpload,
   type ContextSheetMediaAsset,
 } from '@/session/useContextSheetMediaAssets';
 import { sessionCollaborationLabel } from '@/session/collaboration';
@@ -525,7 +527,6 @@ import { ComposerPullThroughScrollView, useComposerPullThroughBridge, type Compo
 import { useMobileKeyboardState } from '@/session/useMobileKeyboardState';
 import { buildSessionComposerLayout } from '@/session/sessionComposerLayout';
 import { discardMobileUploadedAttachment } from '@/session/mobileAttachmentUpload';
-import { buildMobileImageAttachmentCandidate } from '@/session/mobileImageAttachment';
 import { useMobileLocalAttachments } from '@/session/useMobileLocalAttachments';
 import {
   getSentMessageImagePreview,
@@ -6917,6 +6918,13 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
       // 直接按捕获的发送快照合并回 A 的草稿库，并保留 A 期间新输入的后续文字。
       restoreRecoverableItemsToDraft(sessionId, [capturedDraftRecoveryItem()]);
     };
+    // 消息被接收后收起输入框与软键盘(与下拉收起同口径),把屏幕让给对话。
+    // 只在输入框已因本次发送清空时调用:等待期间用户又打了字就不打断输入;
+    // 发送失败不收起,附件托盘与恢复的草稿留在原处供重试。
+    const collapseComposerAfterSend = () => {
+      setComposerVoiceHoldArmed(false);
+      composerInputRef.current?.blur();
+    };
     if (!independent && text && !useDurableOutbox
       && composerDocumentsEqual(composerDocumentRef.current, documentBeforeSend)) {
       applyComposerDocument(documentAfterOptimisticClear);
@@ -7031,6 +7039,7 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
           }
           if (!independent && composerDocumentsEqual(composerDocumentRef.current, documentBeforeSend)) {
             applyComposerDocument(documentAfterOptimisticClear);
+            collapseComposerAfterSend();
           }
           rememberSentAttachmentPreviews(record.item.clientId, readyAttachments, (attachment) => {
             const slot = item.attachmentSlots.findIndex((a) => a?.id === attachment.id);
@@ -7454,6 +7463,10 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
       // 取消归档属于任务本身,不属于页面:电脑已接收就要做,即使用户已离开这个页面。
       if (enqueueAccepted) void unarchiveSessionAfterSend(sessionId, deviceId, invoke);
       if (!sendScopeStillAlive()) return messageAccepted;
+      if (enqueueAccepted && !independent
+        && composerDocumentsEqual(composerDocumentRef.current, documentAfterOptimisticClear)) {
+        collapseComposerAfterSend();
+      }
       if (sessionAtSend.permissionMode === 'plan') {
         // 一次性语义(对齐桌面 PR#494 / 产品决策):计划模式只对本条消息生效,发送后
         // 自动恢复进入前的权限档;本条消息通常已按 plan 派发,切换只影响后续消息。
@@ -8899,38 +8912,20 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
     }
     return ids;
   }, [pendingUploads]);
-  // 单张点按即同步入队，再关闭面板；不等待鉴权或上传才占用附件槽位。
-  const toggleMediaAssetAttachment = useCallback((asset: ContextSheetMediaAsset, dismiss?: (afterClose: () => void) => void) => {
-    if (mediaTapAcceptedRef.current || mediaAssetAttachments[asset.id] || uploadingMediaAssetIds.has(asset.id)) return;
-    if (attachments.length + getPendingUploadCount() >= MOBILE_MAX_ATTACHMENTS) {
+  // 点照片是一张、底部「加入对话」是选择圈选中的多张：都同步入队，再关闭面板；
+  // 不等待鉴权或上传才占用附件槽位。
+  const addMediaAssetAttachments = useCallback((assets: readonly ContextSheetMediaAsset[], dismiss?: (afterClose: () => void) => void) => {
+    if (mediaTapAcceptedRef.current) return;
+    const fresh = assets.filter((asset) => !mediaAssetAttachments[asset.id] && !uploadingMediaAssetIds.has(asset.id));
+    if (fresh.length === 0) return;
+    if (attachments.length + getPendingUploadCount() + fresh.length > MOBILE_MAX_ATTACHMENTS) {
       setAttachmentError(t('session.common.maxAttachments', { max: MOBILE_MAX_ATTACHMENTS }));
       return;
     }
     mediaTapAcceptedRef.current = true;
     setAttachmentError(null);
-    enqueueUploads([{
-      kind: 'image' as const,
-      uri: asset.uri,
-      name: asset.filename,
-      size: 0,
-      sourceId: asset.id,
-      resolve: async () => {
-        const resolved = await resolveContextSheetMediaAssetForUpload(asset);
-        const candidate = buildMobileImageAttachmentCandidate({
-          fileName: resolved.filename,
-          uri: resolved.uri,
-        }, 0);
-        return {
-          uri: candidate.uri,
-          name: candidate.name,
-          mimeType: candidate.mimeType,
-          width: resolved.width,
-          height: resolved.height,
-          // HEIC 已在 resolve 阶段一次性转码 + 缩边,跳过 preprocess 防二次有损。
-          skipPreprocess: resolved.optimized === true,
-        };
-      },
-    }], { token: auth.getAccessToken() });
+    // 候选带上选中序号:并发上传谁先传完都按选中顺序进托盘。
+    enqueueUploads(contextSheetMediaUploadCandidates(fresh), { token: auth.getAccessToken() });
     const restoreEditing = () => {
       // The sheet hides the keyboard while WebView can retain DOM focus.
       // Release it after dismissal so focus() can open the keyboard again.
@@ -8943,6 +8938,17 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
       restoreEditing();
     }
   }, [auth, enqueueUploads, attachments.length, getPendingUploadCount, mediaAssetAttachments, uploadingMediaAssetIds, t]);
+  const toggleMediaAssetAttachment = useCallback(
+    (asset: ContextSheetMediaAsset, dismiss?: (afterClose: () => void) => void) => addMediaAssetAttachments([asset], dismiss),
+    [addMediaAssetAttachments],
+  );
+  // 选择圈多选的待选集：留在面板里，点底部按钮才一起加入；没提交就关掉面板即放弃。
+  const mediaSelection = useContextSheetMediaSelection({
+    open: contextSheetOpen,
+    getRemainingSlots: () => MOBILE_MAX_ATTACHMENTS - attachments.length - getPendingUploadCount(),
+    onLimitReached: () => setAttachmentError(t('session.common.maxAttachments', { max: MOBILE_MAX_ATTACHMENTS })),
+    onChanged: () => setAttachmentError(null),
+  });
   // 勾选态按「映射的附件仍在列表里」现算,附件被单独移除 / 发送清空后角标自动消失。
   const selectedMediaAssetIds = useMemo(() => {
     const attachmentIds = new Set(attachments.map((item) => item.id));
@@ -10390,6 +10396,7 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
         <SessionHeaderBar
               deviceId={deviceId}
               horizontalSystemHeader={horizontalSystemHeader}
+              statusRowReserve={sharedStatusRowTrailingReserve(adaptiveWindow, nativeHeaderHeight)}
               currentSession={currentSession}
               diffCount={diffCount}
               isDeviceAccessRevoked={isDeviceAccessRevoked}
@@ -10669,7 +10676,7 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
                 disabled={!canUseComposer}
                 enabled={contextSheetOpen}
                 onToggleAsset={toggleMediaAssetAttachment}
-
+                selection={mediaSelection}
                 selectedAssetIds={selectedMediaAssetIds}
                 testID="session.contextSheetPhotos"
               />
@@ -10695,6 +10702,13 @@ function SessionScreenContent({ beforeSessionSwitchRef, newSessionActionRef }: S
               label={t('session.collab.createWorkerSubmit')}
               onPress={() => void collab.submitCreate()}
               testID="session.collabCreateWorkerButton"
+            />
+          ) : contextSheetView === 'main' && contextSheetMediaLibraryEnabled && mediaSelection.assets.length > 0 ? (
+            <ContextSheetMediaAddButton
+              disabled={!canUseComposer}
+              onAddAssets={addMediaAssetAttachments}
+              selection={mediaSelection}
+              testID="session.contextSheetAddPhotosButton"
             />
           ) : undefined}
           testID="session.contextSheet"
@@ -11832,6 +11846,7 @@ type SessionHeaderIcon = typeof Folder;
 function SessionHeaderBar({
   deviceId,
   horizontalSystemHeader,
+  statusRowReserve,
   noticeOverride,
   currentSession,
   diffCount,
@@ -11862,6 +11877,8 @@ function SessionHeaderBar({
 }: {
   deviceId: string;
   horizontalSystemHeader: boolean;
+  /** Trailing width the native bar leaves to a shared status row (Duo portrait), see sharedStatusRowTrailingReserve. */
+  statusRowReserve: number;
   noticeOverride?: string;
   currentSession: RemoteSession | null;
   diffCount: number;
@@ -11973,13 +11990,11 @@ function SessionHeaderBar({
   const systemBack = useSystemNavigationBack();
   const headerWindow = useAdaptiveWindow();
   const headerInsets = headerWindow.insets;
-  // Budget the title together with both toolbars; UIKit cannot shrink a
-  // fixed-size React title's contents when the trailing glass capsule grows.
-  const nativeTitleMaxWidth = Math.max(0, Math.min(240,
-    headerWindow.width - headerInsets.left - headerInsets.right
-      - (spacing.lg + spacing.xs) * 2 - navigationChrome.target * ((onOpenSessionList ? 5 : 4) - (workerHeader ? 2 : 0))
-      - (onOpenSessionList ? spacing.sm : 0) - spacing.sm * 2,
-  ));
+  // Budget the title together with both toolbars and, on Duo portrait, the status area.
+  const nativeTitleMaxWidth = sessionNavigationTitleMaxWidth({
+    barWidth: headerWindow.width - headerInsets.left - headerInsets.right,
+    sessionList: !!onOpenSessionList, detailsOnly: workerHeader, statusRowReserve,
+  });
   const sessionListButton = onOpenSessionList ? (
     <HomeHeaderGlassButton accessibilityLabel={t('home.drawer.openA11y')}
       onPress={onOpenSessionList} testID="session.sessionListButton">

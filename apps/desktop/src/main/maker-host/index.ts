@@ -1,3 +1,4 @@
+import { attachmentPreservation, attachmentStorageRoots } from './oversized-attachment-recovery.js';
 import { createCodexLocalModelSink } from './codexLocalModelSink.js';
 import { createCodexSpawnConfig, createCodexRoutingSignature } from './codexSpawnConfigCore.js';
 import { refreshCodexGatewayRuntime } from './codexGatewayRefresh.js';
@@ -34,7 +35,8 @@ import { createMediaDownloadContext } from '../cindy-media/mediaDownloadApproval
 import { setPluginModelPickerAgentProvider, setPluginRouteAgentStatusProvider } from '../cindy-brain/ghostModelPicker.js';
 import { isCodexAccountProvider, setCodexAccountRetirement } from './codex-account-auth.desktop.js';
 import { withSubscriptionAccounts } from '../subscription-accounts/agent.js';
-import { onSubscriptionPoolCodexModelsChanged } from '../subscription-accounts/runtime.js';
+import { onSubscriptionPoolCodexModelsChanged, onSubscriptionPoolClaudeModelsChanged } from '../subscription-accounts/runtime.js';
+import { NATIVE_SUBSCRIPTION_ACCOUNT } from '@cindy/maker-core';
 import { readCodexThreadStorageReadOnly, prepareCodexResumeSession, resolveCodexThreadStorage, recordCodexThreadLocation } from './codex-thread-storage.js';
 import { createSessionArchiveSync, prepareArchiveSessions } from './session-archive-sync.js';
 import { getCurrentDbClientSnapshot } from '../localDb/client/current.js';
@@ -105,6 +107,7 @@ import { throwIpcError } from '../utils/ipcValidate.js';
 import { makerStartupGate } from './startup-gate.js';
 import { cleanupSessionTempAttachments } from '../maker-ipc/normalizeAttachments.desktop.js';
 import { resolveGhostFsSessionSnapshot } from '../maker-ipc/ghostFsSessionSnapshot.js';
+import { ghostToolLifecycleControl } from '../cindy-brain/index.js';
 import { HOST_CONFIRM_TIMEOUT_MS } from '../maker-ipc/hostConfirmTiming.js';
 import { getActiveInteractionRoute, requestHostInteraction } from '../maker-ipc/interactionRouter.js';
 import { setAgentAppUpdateSessionHost } from '../agent-app-update/index.js';
@@ -138,6 +141,7 @@ import type { MakerSessionCreateOpts } from '../maker-ipc/sessionRequest.js';
 import {
   dispatchInterAgentMessage,
   captureRemoteWorkerReportSettlement,
+  deliverRemoteWorkerReport,
   captureLocalWorkerReport,
   getOrcaWorkerReportQueue,
   getSessionActiveInputClientIds,
@@ -271,6 +275,7 @@ import { disposeRemoteAgentHost, installRemoteAgentHost } from '../remote-agent/
 import { disposeLocalAgentHost, installLocalAgentHost } from '../local-agent/service.js';
 import {
   getClaudeEndpoint,
+  resolveClaudeAgentEndpoint,
   setClaudeProxyGatewayKeyReader,
 } from './anthropic-compat-proxy-host.js';
 import { resolveRemoteClaudeRoute } from './remote-claude-route.js';
@@ -445,6 +450,11 @@ let _claudeSubscriptionEnvFollow: ClaudeSubscriptionEnvFollower | null = null;
 setPluginModelPickerAgentProvider(() => _maker?.listAvailableAgents() ?? []);
 setPluginRouteAgentStatusProvider(async (agent) => _maker?.getAgentStatus(agent as AgentKind));
 let remoteWorkerBridge: ReturnType<typeof createOrcaRemoteWorkerBridge> | null = null;
+let workerBridgeProvider: ReturnType<typeof createOrcaWorkerBridgeMcpProvider> | null = null;
+
+export function prepareRestoredOrcaReportAcceptance(sessionId: string) {
+  return workerBridgeProvider?.prepareLeadReportAcceptance(sessionId);
+}
 
 export function handleRemoteWorkerBridge(
   raw: unknown,
@@ -556,6 +566,10 @@ setActiveCatalogChangedListener((revision) => {
 // capability-before-broadcast ordering as the active catalog, including remote views.
 onSubscriptionPoolCodexModelsChanged(() => {
   refreshSelectableModelsAndBroadcast({ providerId: 'openai' });
+  modelContextRuntimeRefreshListener?.();
+});
+onSubscriptionPoolClaudeModelsChanged(() => {
+  refreshSelectableModelsAndBroadcast({ providerId: 'anthropic' });
   modelContextRuntimeRefreshListener?.();
 });
 
@@ -1378,6 +1392,7 @@ export function getMaker(): Maker {
       },
     } satisfies OrcaBridgeMcpDeps;
     const orcaWorkerBridgeProvider = createOrcaWorkerBridgeMcpProvider(orcaBridgeDeps);
+    workerBridgeProvider = orcaWorkerBridgeProvider;
     remoteWorkerBridge = createOrcaRemoteWorkerBridge({
       getOwnerToken: getCurrentDbClientSnapshot,
       readSession: getRemoteOrcaSession,
@@ -1385,7 +1400,10 @@ export function getMaker(): Maker {
       activeTeamId: async id => (await getActiveTeamByLead(id))?.id ?? null,
       remoteInvoke,
       // Remote runtime settles only the reported inputs; queued assignments keep running.
-      invokeTool: (ctx, tool, args) => orcaWorkerBridgeProvider.invokeTool(ctx, tool, args, { manageWorkerStatus: false }),
+      invokeTool: (ctx, tool, args, reportClientId, onReportRejected) => orcaWorkerBridgeProvider.invokeTool(ctx, tool, args, {
+        manageWorkerStatus: false, ...(reportClientId ? { reportClientId } : {}), onReportRejected,
+      }),
+      deliverReport: (sessionId, ids, send) => deliverRemoteWorkerReport(sessionId, ids, send, result => !result.isError),
       getActiveInputClientIds: getSessionActiveInputClientIds,
       getAcceptedInputProvenance: sessionId => getSessionInputProvenance(sessionId).input,
       captureReportSettlement: captureRemoteWorkerReportSettlement,
@@ -1471,12 +1489,13 @@ export function getMaker(): Maker {
     });
     const claudeAgent = new ClaudeCodeAgent({
       resolveLocalMcpDuplicateChoices,
+      toolLifecycleControl: ghostToolLifecycleControl,
       resolveSessionEnvironment: resolveCompanionRuntimeEnvironment,
       getDisabledSkillPaths: readDisabledSkillPaths,
       getManagedSkills: listCindyManagedSkills,
       scanLocalCustomizations,
       auth: desktopClaudeAuthAdapter,
-      runtimeConfig: buildDesktopClaudeRuntimeConfig(getClaudeEndpoint),
+      runtimeConfig: buildDesktopClaudeRuntimeConfig(getClaudeEndpoint, resolveClaudeAgentEndpoint),
       get binaryPath() { return requireBinary('claude-code'); },
       logger: desktopMakerLogger,
       turnChangeCapture: {
@@ -2235,6 +2254,7 @@ export function getMaker(): Maker {
     // latest-byte-edge runtime snapshot for its durable mutation.
     const pendingPiPackageRuntimeSnapshots: PiPackageRuntimeInvalidationSnapshot[] = [];
     const buildPiAgentForDesktop = () => buildPiAgent({
+      toolLifecycleControl: ghostToolLifecycleControl,
       logger: desktopMakerLogger,
       turnChangeCapture: {
         beforeKnownFileWrite: captureKnownFileBefore,
@@ -2611,6 +2631,8 @@ export function getMaker(): Maker {
       // Agent 在同账号另一台电脑上运行、任务与文件留在本机(见 remote-agent/)。
       startDeviceAgentSession: createDeviceAgentStarter({
         readImageDeliveryEpoch: readGeneratedImageEpoch,
+        attachmentPreservation: sessionId => attachmentPreservation(sessionId),
+        attachmentStorageRoots: sessionId => attachmentStorageRoots(sessionId),
         remoteInvoke: remoteBackgroundInvoke,
         renewSharedProviderLink: (peer) => isCrossRegionProviderShareTarget(peer)
           ? renewCrossRegionProviderShareLink(peer) : openRemoteLink(peer),
@@ -3016,8 +3038,9 @@ export function getMaker(): Maker {
     void apiModelBackfill.request();
     // Anthropic 清单只来自 Claude Code SDK:maker 就绪后主动读一次,不等用户先跑任务
     // (旧缓存也可能缺少 SDK 只以简称返回的当前型号)。登录 / 认领后由对应收口再次请求。
-    setAnthropicModelProbe((onSupportedModels) =>
-      makerRef.refreshAgentLocalModels('claude-code', { onSupportedModels }),
+    setAnthropicModelProbe((onSupportedModels, account) =>
+      makerRef.refreshAgentLocalModels('claude-code', { onSupportedModels,
+        ...(account ? { [NATIVE_SUBSCRIPTION_ACCOUNT]: account } : {}) }),
     );
     requestAnthropicModelProbe();
     // 本地定制:跟随 CC Care 环境切换(释放旧环境的空闲任务、刷新登录态与模型清单)。
@@ -3158,6 +3181,7 @@ export function resetMaker(): void {
   // Callers keep this Maker when PI teardown is unconfirmed, preserving supervision.
   releaseSessionBindingsForOwnerBoundary();
   remoteWorkerBridge = null;
+  workerBridgeProvider = null;
   void disposeLocalAgentHost();
   disposeRemoteAgentHost();
   _sessionArchiveSync?.stop();

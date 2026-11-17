@@ -13,5 +13,5 @@ export const { claudeCliNetworkEnv, refreshClaudeCliLoginStatus, readClaudeCliLo
   subscriptionLauncher: getClaudeSubscriptionLauncherFor,
   binaryPath: () => getReadyBinaryPath('claude-code') ?? null,
   resolveOutboundProxy: resolveDesktopOutboundProxy,
-  readStatus: async options => parseClaudeCliLoginStatus(await readClaudeCliStatusInWorker(options)),
+  readStatus: readClaudeCliStatusInWorker,
 });

@@ -3,6 +3,20 @@
 > **状态**：权威开发规则（authoritative）
 > **读取时机**：新增或修改图片、视频、音频、3D 模型的生成、导入、附件、缓存、
 > 持久化、协议解析、远程传递或回收逻辑之前
+> **适用路径**：`apps/desktop/src/main/cindy-media/**`、
+> `apps/desktop/src/main/cindy-proxy-media/**`、
+> `apps/desktop/src/main/{image,video,model,audioFile,localFile}Protocol.ts`、
+> `apps/desktop/src/main/cindy-brain/ghostMedia*.ts`、
+> `apps/desktop/src/main/device-link/*{M,m}edia*.ts`、
+> `apps/desktop/src/main/im/**/*{M,m}edia*.ts`、
+> `apps/desktop/src/main/maker-ipc/chatServerMedia.ts`、
+> `apps/desktop/src/main/mcp-integrations/{cindyProxyMedia,mediaToolResultFallback}.ts`、
+> `apps/desktop/src/main/{lightboxMediaActions,projectIconMedia}.ts`、
+> `apps/desktop/src/main/bot-import/memoryMedia.ts`、
+> `apps/desktop/src/main/session-share/mediaUrlRewrite.pure.ts`、
+> `apps/desktop/src/shared/{remoteMediaUrl,mediaInvocation}.ts`、
+> `apps/desktop/src/main/maker-host/{attachmentPreservation,oversized-attachment-recovery,oversizedAttachmentRecoveryCore}.ts`、
+> `apps/desktop/src/main/remote-agent/attachmentPreservation.ts`
 
 本文治理 Desktop 中由 Cindy 管理副本的媒体字节。Electron 协议与进程安全另见
 [`electron-security-and-process-boundaries.md`](electron-security-and-process-boundaries.md)，
@@ -48,6 +62,11 @@
     `im-attachments/wechat/sessions/<任务ID>/`。
   - 任务删除时，两者与上述四个渠道统一由 `removeImSessionAttachmentDirs` 清理。迁移这两个渠道前，
     先对齐本条规则。
+- 插件经 `cindy.tasks.send` / `cindy.targets.send` 转进任务的附件（例如微信群插件转发的照片、视频、文件）
+  按同一判据分流（`cindy-media/pluginMessageAttachments.ts`）：Host 按真实字节识别，总仓白名单内的图片与音视频
+  进总仓，其余按非媒体文件放进同一棵 `im-attachments/plugin/`（消息本身的文件领养进 `sessions/<任务ID>/`，
+  只给模型的参考文件留在 `staging/` 按龄回收）。细则见
+  [插件任务接口实现](plugin-task-api-implementation.md#消息附件)。
 
 ## 写入与记账
 
@@ -240,17 +259,54 @@ Windows 使用 CF_HDROP，macOS 使用文件 URL 剪贴板，视频／GIF 均按
 
 ## 媒体调用说明与执行绑定
 
-- 图片、视频的新调用说明统一从 Server 读取。Guide 只描述请求、参数、响应与轮询协议；
+- 图片、视频的公开调用说明从 Server 读取；用户自带连接可保存账号隔离的自定义 Guide。
+  每次需要时获取，自定义优先、官方后备，没有加载或重载步骤。Guide 只描述请求、参数、响应与轮询协议；
   provider、实际地址、Key、连接摘要、模型可见性和额度归连接与执行上下文。
 - 客户端按完整 `modelId` 及连接已有的接口格式读取公开资料，不发送账号 token、Key、
-  base URL 或连接摘要。协议说明不可用时不在本地生成 Guide，也不发出付费请求。
+  base URL 或连接摘要。缺少说明时，当前 Agent 根据用户提供的文档、cURL、示例或提示生成
+  候选，通过 `manage_media_guide` 的 get/validate/save 获取、校验和保存；Host 不隐藏调用 LLM。
+  目录呈现用户声明的媒体模型，prepare 时才按需获取说明，不逐模型预判接口是否适配。
   客户端根据本地来源绑定现有图片适配器、视频执行器或网关，不按 Server 的 `guideId` 分派。
 - `prepare` 在既有 `guide_json` 中保存选定 operation 及独立的 `binding`；`revision` 表示
-  Server 协议版本，视频 `binding.connectionRevision` 表示本地连接摘要。地址、Key 或来源
+  协议版本，自定义 HTTP 绑定同时保存 Guide 来源与 sourceAgent；视频/HTTP 的
+  `binding.connectionRevision` 表示本地连接摘要。地址、Key 或来源
   变化继续按原摘要校验，已付费任务的查询与下载不要求重新读取 Server Guide。
+  官方视频执行器同样保存已选 `sourceAgent`，提交、轮询和内容读取均沿用该来源；
+  不再从同型号的聚合目录重新选择凭据。既有视频协议的路径规则保持，旧无此字段的快照仍可读。
+- HTTP Guide 提错任务编号、状态或结果字段时，补齐 Guide 并重新 `prepare`，传入
+  `source_invocation_id` 将原付费调用的回执绑定新快照；原 `guide_json` 不变。要求同账号、
+  provider、模型、能力、sourceAgent 与连接摘要，且原 request/poll 当前不在执行。
+  prepare 原子保存为已有结果/任务的 pending，不能再次生成；不访问上游，返回后直接
+  依 `next_action` 走现有 request/poll、权限和入仓流程，没有独立恢复动作。
+  重新提取的任务编号变化时只保留提交回执，不复用旧编号的轮询响应或结果；编号相同才可复用。
+  原回执缺失时说明无法恢复，不自动重提。Guide 不能提供凭证；Google/Anthropic 鉴权头复用实际连接
+  （含型号覆盖）的协议与所选 runtime 的托管 Key。
+- 声明式 HTTP 的提交回执和最近轮询回执保存在账号数据库已有的 `response_json`，以
+  `__cindyMediaReceipt` 区分未完成回执与已生成结果；旧的直接结果 JSON 继续可读，不改物理 schema。
+  未完成回执仍占在途名额并按原 TTL 清理；待交付结果沿用原恢复保留规则。
+  复制回执的 prepare 在既有 128 条名额检查中计入本账号所有 pending 记录，避免带结果的
+  回执副本绕过限制；回执内的上游响应沿用原字节上限，普通生成仍按原在途规则统计。
+  回执不进入 Guide、日志或 Agent 输出。每次 poll 至多更新一份回执，内容未变不重复写入。
 - 升级时只解码旧快照的 `connection` 和旧视频 revision，不请求时重写历史记录，不改数据库
-  物理 schema。旧 Guide ID 仅用于解码既有记录，不参与新调用选择。Server 须先支持公开协议读取，
-  已发布客户端继续使用旧接口投影。
+  物理 schema。旧 Guide ID 仅用于解码既有记录，不参与新调用选择。复用 Server 已有的公开协议读取接口，
+  不新增服务端协议或要求配套发布。
+- 自定义 Guide 的唯一写入者是模型配置域，按账号及实际 provider/runtime/model 保存；
+  保存需核对旧 revision 和当前任务权限，失败保留原定义。官方默认不复制进本地覆盖。
+  Guide 可不注入 body model，URL 用 `{model}` 引用型号；资料来源只以 `evidence.kind` 记录
+  `documentation/curl/prompt` 类型，不保存资料原文或凭据，不伪造 `officialDocs`。
+- 原生 HTTP 执行复用现有提交、轮询、结果保存及下载入仓流程。请求 path 相对实际连接基址，
+  原样拼接；标准 URL 归一化后的 origin 与路径段范围仍须位于该连接基址内，
+  生成、轮询与原任务内容读取共用范围检查。不得自动删除前缀、去重路径或转换参数；
+  不适配时由 Agent 根据资料补本地 Guide。
+  Guide 不能改 host 或凭证。
+  公开来源只决定说明，不改变 provider、runtime、账号或计费。新说明只影响新的 prepare。
+- Core 返回 HTTP 状态、脱敏上游错误及提交/任务状态等事实；Agent 通过工具提示判断是否
+  调整参数、处理连接、尝试官方或请用户补资料。错误文本在截断前按本次实际发出的连接
+  `apiKey` 和全部托管 header 值精确脱敏，不按 header 名猜测；使用出站快照，不读取
+  刷新后的值替代原值。生成的公开协议头不属托管来源，保留非敏感的上游说明。
+  不新增业务错误分类和自动后备重试。
+  所有调用继续走 Ask/Auto/完全访问权限；结果未知、pending 或已生成未交付时恢复原任务，
+  不能靠换 Guide、新 invocation、脚本或原始 HTTP 重复生成或绕过权限。
 - 存量插件的 `cindy-request` 图片、视频接口保留原参数与返回格式。Host 完成原有权限、配额、
   参考图归属与账号校验后，把旧参数转换为 Server operation 的输入，直接调用已有
   `callCindyMedia` 的 `prepare/request/poll`，不另起 Agent 或媒体执行链，也不按 Guide ID 筛选。
@@ -264,7 +320,9 @@ Windows 使用 CF_HDROP，macOS 使用文件 URL 剪贴板，视频／GIF 均按
 
 - 下载是生成流程内部的一步，不新增“领取”状态、列表或用户操作。上游返回后，客户端
   下载并通过 `ingestMedia` 返回受管媒体；需要确认时暂停同一次操作，批准后自动继续。
-- Guide 的 `allowedUrlHosts` 保留为已确认来源名单。使用 `openai-videos` 的自定义视频连接还将
+- 官方 Guide 的 `allowedUrlHosts` 保留为已确认来源名单。账号本地自定义 Guide 的域名声明
+  不构成来源授权，URL 结果沿用名单外来源的既有确认；保存或 prepare 通过不免除此确认。
+  使用 `openai-videos` 的自定义视频连接还将
   绑定中转站的域名及其子域名视作已确认结果来源（排除 IP、无点域名和 `.local`）。
   名单内的正常结果 URL 自动通过隔离下载读取，仅允许 GET，不携带生成接口凭证；
   名单外来源、HTTP、特殊端口、地址内登录信息、受限网络等权限要求通过
@@ -329,8 +387,11 @@ Windows 使用 CF_HDROP，macOS 使用文件 URL 剪贴板，视频／GIF 均按
 - JSON 请求超过宿主入口内存阈值（`maxRequestBodyBytes`）时，先由 `collectRecoverableBody` 分块落 Host 私有临时文件，
   再恢复，不因固定的 128 MiB 内存门槛提前拒绝仍可恢复的历史。Codex 的 HTTP 入口／回退上限
   从 128 MiB 降为 42 MiB，Claude Code／Pi 保持 32 MiB；这些是新控制器无法完成恢复时的边界，
-  不是默认的主动控制触发线。带图但缺少 DB、有效任务绑定、任务已删除或属于远端时，只运行已注入的
-  预处理，不写本机附件路径；仍超宿主上限的请求走旧恢复链，无法恢复则本地拒绝。
+  不是默认的主动控制触发线。托管运行若已绑定控制端附件保存能力，预算计算留在模型运行端，
+  被移出的附件保存到任务所在电脑并返回可读的虚拟路径，无需在运行端伪造任务 DB 行。
+  兼容与故障处理见[远程 Agent 协议](protocol-compatibility/remote-agent.md#托管请求的附件预算与保存2026-11-17)。
+  没有该绑定且缺少 DB、有效任务绑定、任务已删除或属于 SSH 远端时，只运行已注入的
+  预处理，不写本机附件路径；仍超宿主上限且无法恢复则本地拒绝。
 - 旧恢复链继续用 `tokenizeStrings`、`recoverInlineAttachments` 分块扫描和解码，不另设固定的
   单附件体积门槛。临时写入按实际可用磁盘共享预算，预留 256 MiB，并为解析、解码和保存预留副本
   空间；磁盘不足返回明确的 507，可清理空间后重试，原始历史不变。**当前新控制器落盘后会整包

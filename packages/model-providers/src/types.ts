@@ -347,6 +347,8 @@ export interface CatalogModel {
   supportsToolCalls?: boolean;
   reasoningRequired?: boolean;
   userModelConfig?: ProviderRuntimeModelConfig;
+  /** Local Pi Chat compatibility override; not inherited public model metadata. */
+  supportsStore?: boolean;
   catalogPresetId?: string;
   discoveredMetadata?: ModelMetadata;
   discoveredCost?: ModelCost;
@@ -556,6 +558,8 @@ export interface ProviderMediaModel extends Pick<
   discoveredMetadata?: ModelMetadata;
   /** Local projection provenance; not part of the public Registry metadata. */
   sourceAgent?: AgentKind;
+  /** All actual runtime connections; sourceAgent is set only for a unique preferred route. */
+  sourceAgents?: AgentKind[];
   /** Same-provider display-only pricing; never inherited through public model metadata. */
   displayPricing?: ModelDisplayPricing;
   currency?: 'USD' | 'CNY';

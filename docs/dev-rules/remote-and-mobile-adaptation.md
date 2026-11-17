@@ -1,5 +1,12 @@
 # 远程连接与手机版适配
 
+> **读取时机**：新增或修改涉及 workdir 文件、agent 进程、会话数据的功能，新增 IPC channel／推送事件，
+> 或修改 device-link 的重试／超时／断链恢复逻辑之前；功能不在下列路径内时同样适用
+> **适用路径**：`packages/{device-link,remote-file-service,maker-remote-ssh}/**`、
+> `apps/desktop/src/main/device-link/**`、`apps/mobile/src/device-link/**`、
+> `apps/desktop/src/main/{remote-agent,remote-ssh}/**`、`apps/desktop/src/main/remote-desktop*/**`、
+> `apps/mobile/src/remote-desktop/**`、`apps/desktop/src/preload/preload.ts`
+
 ## 弱网下的备用截图与视频恢复（2026-11-15）
 
 备用截图仍走原有远程桌面请求，发送端将 JPEG 压到 64 KiB 以内；base64 与回复包装
@@ -476,6 +483,54 @@ channel + 键（运行诊断单键；带 `providerId` 的用量按账号）做 l
   `node scripts/direct-link-electron-smoke.mjs` 另外启动两个临时 Electron 进程，验证生产
   Main/preload/隔离 renderer 的真实 IPC、WebRTC 与中继回退；账号和 userData 均为独立 fixture。
 
+### 各通道的局域网地址与系统权限（2026-11-16）
+
+控制消息、文件、远程桌面各自建立 WebRTC 连接、各自选路，控制通道直连不代表另外两条也直连。
+局域网能否直连，先看双方能否拿到对方的局域网地址。Chromium 对没有捕获权限的页面只公布
+mDNS 名，解析要靠双方都能收发组播；跨网段、组播被过滤或任一端系统不给局域网权限时，对端
+拿不到地址，只能走公网或 TURN。各端公布的 host 候选如下，新增通道时对照补齐：
+
+| 通道 | 运行位置 | 公布的局域网地址 |
+| --- | --- | --- |
+| 控制消息 | Desktop 隐藏数据窗口 `direct` | 默认路由的真实地址（`default_public_and_private_interfaces`） |
+| 文件、附件、远程视频读取 | Desktop 隐藏数据窗口 `files` | 同上；此前只有 mDNS 名 |
+| 远程桌面被控端 | Desktop 捕获窗口 `desktop` | 全部网卡的真实地址（含 VPN 网卡与 TCP 候选），由捕获权限带来 |
+| 远程桌面查看端 | Desktop 主窗口 | 同上，由受信任页面的媒体权限检查带来 |
+| 手机的控制消息与文件 | Mobile WebView | 只有 mDNS 名；iOS 原生视频接收端为真实地址 |
+
+- **数据窗口显式设置策略。** `direct` 与 `files` 不授予任何捕获权限，由
+  [`captureWindow.ts`](../../apps/desktop/src/main/remote-desktop/captureWindow.ts) 在加载页面前
+  设置地址策略，只公布默认路由的地址、不枚举其他网卡。`desktop` 保持 Chromium 默认：套用同一
+  策略会把它收窄到一块网卡，丢掉 VPN 路径。文件信令只对同账号、已开启被控且未撤权的设备开放
+  （不在共享任务访客和供应商分享的通道清单里），地址随既有 `device-link:file-peer` RPC 送达，
+  与控制通道信令的可见范围一致。
+- **一端公布真实地址即可。** 对端只有 mDNS 名时，由它主动连过来，本端按来源地址建立路径
+  （ICE 的 prflx 候选）。手机因此依赖电脑端公布真实地址。新旧端混用不需要协商：不改 wire
+  协议、能力位和信令格式，自建中转继续透传原 RPC，无需适配。
+- **macOS「本地网络」权限。** 没拿到许可的 App（连同它启动的 Agent、SSH 等子进程）向局域网
+  地址发起的 TCP 与 UDP 一律报 `EHOSTUNREACH`，连网关也不通；公网与 VPN 网卡不受影响。它仍能
+  收到局域网对端先发来的单播 UDP，并在同一个 socket 上回复。所以对端有许可、又知道本机真实
+  地址时，ICE 仍能由对端打通：控制通道一直能直连，只公布 mDNS 名的文件通道不能。Info.plist
+  缺 `NSLocalNetworkUsageDescription` 时系统不弹授权、直接拒绝；正式包由 `forge.config.ts`
+  声明，个人版由 `scripts/personal-build/native-capabilities.mjs` 写入运行时，改动后要用
+  更新过的构建工具重新生成运行时才生效。
+- **故障记录。** 2026-11 两台同一局域网的电脑，控制通道直连，文件却走 TURN（往返 430–580 ms，
+  每秒 5–8 KB）。文件连接的统计里本端有 4 个 host 候选，对端一个也没有；其中一台的 App 没有
+  本地网络许可，既发不出组播，也不能主动连对端。两处都要修：文件窗口公布真实地址，该 App
+  取得本地网络许可。
+- **排查顺序。** ① 文件日志 `device-link:filePeer` 的 `stats.candidates`：`remote` 里没有
+  `host`，说明对端地址没送到或解析不了；② 在 App 启动的子进程里连网关（`nc -z <网关> 80`），
+  报 `No route to host` 而公网可达，说明这个 App 没有本地网络许可，到「系统设置 › 隐私与
+  安全性 › 本地网络」核对；③ 控制通道看 `direct transport reason=`，长期只有
+  `negotiation-timeout` 而没有 `connected`，说明两端都无法主动连到对方。
+- **验证。** [`captureWindow.test.ts`](../../apps/desktop/src/main/remote-desktop/__tests__/captureWindow.test.ts)
+  断言两个数据窗口在导航前设置策略、`desktop` 不设置。`node scripts/provider-share-direct-smoke.mjs
+  --electron-mdns` 用两个真实 Electron 进程验证：双方都只有 mDNS 名时连不上，任一端公布真实地址
+  即可接通并逐字节收发，生产 `files` 窗口的候选为字面地址。Electron 42 / Chromium 148 实测三种
+  配置的候选：无捕获权限的默认策略 2 个 mDNS 名；数据窗口策略为默认路由的 IPv4 与 IPv6 各 1 个；
+  有捕获权限的默认策略为全部网卡的 UDP 与 TCP 地址。真实两台电脑、手机与电脑、跨网段和 VPN 下的
+  文件速度与远程桌面延迟未在本次验证。
+
 ### 系统睡眠前主动离线（2026-11-14）
 
 2026-11-10～14 日志：一台合盖笔记本的直连约 300 次「接上就断」，其中 93% 在 3 分钟内伴随对端离线——
@@ -492,6 +547,31 @@ Desktop 收到 `powerMonitor` 的 `suspend` 即调用 `suspendConnectionsForSyst
 自建中转无需修改，`device-link-relay` interop 通过)；③ 不碰对端链路、不影响其他设备，睡眠被取消或
 缺少唤醒事件时由清醒时间兜底恢复，不会把本机永久留在离线。验证：`client.test.ts`
 「suspendConnectionsForSystemSleep …」。
+
+### 唤醒后远程设备列表的恢复（Desktop，2026-11-17）
+
+现场：MacBook 合盖睡眠一夜，唤醒后 Mac Studio 的请求 1–3 秒成功、手机正常，界面却 40 多分钟显示
+「远程设备已离线」，打开任务只有缓存，协同面板「找不到这条任务」。走兼容连接的同账号设备，其在线
+状态不经主连接上报(`routedClient.ts`)，界面判定它可控主要靠一次设备目录读取；唤醒时这次读取失败，
+main 退回有界的过期快照，数据通道还没就绪的设备在快照里是 `online:false`，界面据此把它移出合格集，
+而所有恢复途径都只看合格集、设备一直在线不会再来上线通知，周期对账又受「5 分钟内有键鼠操作」限制。
+
+`useDeviceLinkRemoteProjects` 的恢复约定：
+- 过期目录不降级当前合格的设备、目录读取失败后的有界重读(5s 起翻倍封顶 60s，让过 429 期限，终态失败
+  与权威作废后停读)沿用 #9360(#9342)的实现；恢复入口与重读计时器只复用在途的那一次目录读取，不叠加请求。
+- 「可达」的正面证据——`PEER_LINK_REOPENED`、该设备数据通道就绪、重复的上线通知、在线 presence——对
+  合格但分片未确认在线的设备补一次首拉(复用在途任务)；对已被移出合格集但仍留分片的设备重读目录
+  (同一设备至少间隔 30 秒)，不凭证据伪造在线。
+- 恢复巡检只对合格、可读、未熔断、分片未确认在线的设备按设备退避(10s→120s)跑完整首拉，不看用户是否
+  在操作；没有待恢复设备时计时器停止，首拉未能确认在线或窗口重新可见时再起。周期 anti-entropy 只管
+  已确认在线的设备，两条路径不重复拉同一台。
+- 远程 Lead 的同机 worker 在协同面板读取前钉到 Lead 的设备(`OrcaWorkerPanel`)，不回落本机。
+- 历史视图读取失败上报 `source:'failed'` 诊断(只带错误码)，两端日志都能看出读取是否发出及失败原因。
+
+故障半径：① 故障在单台设备的界面列表状态，链路与中转正常；② 恢复只作用于该设备(重读目录 / 重跑
+该设备首拉)，不重连中转、不碰其它设备；③ `deviceLinkRemoteRecovery.test.tsx`「wake-from-sleep
+recovery」覆盖过期目录、离线报告后的目录补读、无用户操作的首拉补齐，并断言健康设备请求数不变。
+不改 wire 协议与中转行为，自建中转无需同步修改。
 
 ## 远程 Agent 的拉取与恢复(`maker:remote-agent:v1`)
 
@@ -818,10 +898,22 @@ Mobile 历史读取在 relay 已在线且目标 presence 不是明确不可用�
 历史控制器与页面同步；也不能为了放行读取伪造在线快照。明确离线／停用或 relay 未在线时
 仍只展示缓存，授权、撤权和旧代结果拦截继续由原链路处理。
 
-Mobile 项目标题的电脑图标同样使用共享连接状态、当前 presence、无响应与撤权证据，
+Mobile 项目标题的电脑图标只使用针对这台电脑的证据：当前 presence、无响应与撤权，
 不从页面局部设备清单的缺失、旧快照或列表读取失败推导断连。首页、任务抽屉与宽屏常驻列表
-共用此判据；重建列表与普通同步不会重置连接图标，真实断连与恢复仍随共享状态更新。
+共用此判据；重建列表与普通同步不会重置连接图标，真实断连与恢复仍随 presence 更新。
 实现与回归见 `homeProjectMachineIdentity.ts`、`HomeSurface.tsx` 与 `homeProjectMachineIdentity.test.ts`。
+
+**手机自己的连接问题不是电脑离线的证据**（2026-11-16）。每次回到 App 手机都要重连中继，
+期间电脑图标曾全部显示为已断开；手机中继断线后保留的直连也断开时，还会给电脑合成一条离线
+presence，请求随即按 `DEVICE_OFFLINE` 失败、首页把电脑标成离线并排入镜像清理，重连后才恢复。
+现在手机中继未在线只由连接横幅说明，电脑状态保持上一次已知结果；直连断开只有在中继此前已
+明确通知该电脑离线（保留期内被直连顶住的判定）时才落成离线，否则与中继断线时的其它对端
+同样处理：失效该对端的建链缓存与订阅 ACK、取消它的恢复排队，请求按瞬时 `NOT_CONNECTED`
+等待手机重连。故障半径三问：① 证据是手机本机的中继连接与这一条直连，都不涉及电脑是否在线；
+② 只失效这一台电脑的建链缓存、订阅 ACK 与恢复排队，不改 presence、不清镜像、不重建连接，
+其它电脑不受影响，电脑真的离线时由重连后的中继判定、名单读取或建链回绝给出；③ 回归见
+`historyViewProvider.test.tsx`「does not declare the computer offline when the phone loses its
+relay and then the direct path」，修复前该用例得到 presence=false。
 
 Mobile 返回任务或恢复网络时，历史视图只恢复展示，由页面既有同步协调器发起快照，
 不再由视图激活另读一页。已有缓存且订阅尚未确认时，最多等待 2 秒合并本次列表／详情
@@ -988,6 +1080,13 @@ Desktop 的同账号远程 Cindy Make 任务同样消费该投影：准备与测
 共用；不增加已完成结果缓存。远程权限结论仍只在授权边界处理。
 
 ### 远程边界与延迟诊断
+
+Desktop 远程发送的附件授权作用域绑定账号与发起文档，不绑定当前任务路由。
+HashRouter 的同文档导航（切换任务或新任务进入任务页）不得取消在途发送，也不得把
+原始传输超时覆盖成附件授权失效；主文档替换、窗口销毁与账号失效仍立即取消，文件读取
+和最终派发仍复核原 frame 与账号。实现与回归见 `device-link/ipc.ts`、
+`device-link/__tests__/mirrorCacheIpcBoundary.test.ts`。此边界只在本机 IPC adapter 生效，
+不改变远端或自建中转的协议、授权与重试策略。
 
 远程列表复用本地查询，返回前额外执行伙伴可见性过滤。过滤按本次授权阶段批量查询，
 每条 SQL 最多 200 个 ID；不跨请求缓存授权结论。缓存回复与离线重放仍重新检查，账号
