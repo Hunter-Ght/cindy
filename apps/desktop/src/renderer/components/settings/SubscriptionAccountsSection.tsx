@@ -36,7 +36,7 @@ import {
   formatCodexPlanLabel,
 } from '@/lib/subscriptionPlanLabel';
 import { toast } from '@/lib/toast';
-import { extractIpcError } from '@/utils/ipcError';
+import { subscriptionAccountErrorKey } from './subscriptionAccountErrors';
 import { cn } from '@/lib/utils';
 import {
   QUOTA_WINDOW_COLUMNS,
@@ -45,6 +45,7 @@ import {
 } from '../status/QuotaHoverCard';
 import { buildSubscriptionAccountUsageCard } from '../status/usageCardModel';
 import {
+  isPluginEngineProviderIdShape,
   isUnusedDefaultAccount,
   type SubscriptionAccountCommand,
   type SubscriptionAccountView,
@@ -73,6 +74,14 @@ import {
   useMoveSubscriptionAccount,
   useSubscriptionPlacementTargets,
 } from './SubscriptionPlacement';
+import { pluginEngineUsageAccount } from '../status/pluginEngineUsageAccount';
+import { usePluginEngines } from '@/hooks/usePluginEngines';
+import { usePluginEngineSignIn } from './PluginEngineSignIn';
+
+/** `acp-plugin:<plugin>:<engine>[~<suffix>]` → `<plugin>:<engine>`. */
+function pluginEngineKeyOf(providerId: string): string {
+  return providerId.slice('acp-plugin:'.length).replace(/~[a-z0-9]{8}$/, '');
+}
 
 function AccountResetCredits({ scope }: { scope: string }) {
   const { snapshot, refresh } = useCodexRateLimits(true, scope);
@@ -190,6 +199,11 @@ export function SubscriptionAccountsSection({
   const [busy, setBusy] = useState(false);
   const login = useRef<string | null>(null);
   const inFlight = useRef(false);
+  // A plugin engine provider (2026-11-23): accounts sign in through the plugin's own methods.
+  const plugin = isPluginEngineProviderIdShape(providerId);
+  const engineKey = plugin ? pluginEngineKeyOf(providerId) : null;
+  const engines = usePluginEngines(plugin);
+  const pluginSignIn = usePluginEngineSignIn();
   const epoch = useRef(0);
   const refresh = useCallback(async () => {
     const current = ++epoch.current;
@@ -214,7 +228,8 @@ export function SubscriptionAccountsSection({
     void refresh();
     // Change notifications name the account pool (kind), shared by every provider of that kind.
     const unsubscribe = window.electronAPI.subscriptionAccounts.onChanged((event) => {
-      if (event.providerId === kind) void refresh();
+      if (engineKey ? pluginEngineKeyOf(event.providerId) === engineKey && event.providerId.startsWith('acp-plugin:')
+        : event.providerId === kind) void refresh();
     });
     const focus = () => {
       void refresh();
@@ -232,8 +247,18 @@ export function SubscriptionAccountsSection({
           .command({ action: 'cancel', providerId, loginKey: login.current })
           .catch(() => {});
     };
-  }, [providerId, kind, refresh]);
-  const placementTargets = useSubscriptionPlacementTargets(kind, providerId);
+  }, [providerId, kind, engineKey, refresh]);
+  const builtinTargets = useSubscriptionPlacementTargets(plugin ? null : kind, providerId);
+  // A plugin engine's accounts move only between the providers of that engine.
+  const placementTargets = engineKey
+    ? engines.filter((engine) => (engine.accountProviderOf ?? engine.key) === engineKey && engine.providerId !== providerId)
+      .map((engine) => ({ id: engine.providerId, name: engine.name }))
+    : builtinTargets;
+  const pluginInfo = view?.pluginEngine;
+  const pluginMethods = pluginInfo?.methods ?? [];
+  /** Plugin engines ask the plugin's method (and a key) first; null = cancelled. */
+  const signInFields = async (title: string): Promise<{ methodId?: string; secret?: string } | null> =>
+    plugin ? pluginSignIn(pluginMethods, title) : {};
   const moveAccount = useMoveSubscriptionAccount(providerId, () => void refresh());
   const run = async (command: SubscriptionAccountCommand) => {
     if (inFlight.current) return;
@@ -244,17 +269,8 @@ export function SubscriptionAccountsSection({
       await window.electronAPI.subscriptionAccounts.command(command);
       await refresh();
     } catch (error) {
-      const code = extractIpcError(error)?.code;
-      if (code !== 'SUBSCRIPTION_LOGIN_CANCELLED')
-        toast.error(t(
-          code === 'SUBSCRIPTION_CODEX_PROVIDER_AUTH'
-            ? 'subscriptionAccounts.providerManagedAuth'
-            : code === 'SUBSCRIPTION_CLAUDE_ACCOUNT_MISMATCH'
-              ? 'subscriptionAccounts.loginIdentityMismatch'
-              : code === 'SUBSCRIPTION_CLAUDE_IDENTITY_UNKNOWN'
-                ? 'subscriptionAccounts.loginIdentityUnknown'
-                : 'subscriptionAccounts.failed',
-        ));
+      const key = subscriptionAccountErrorKey(error);
+      if (key) toast.error(t(key));
       await refresh();
     } finally {
       inFlight.current = false;
@@ -289,9 +305,9 @@ export function SubscriptionAccountsSection({
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {/* A built-in provider holds the CLI default login and is never merged away as a whole. */}
-          {providerId !== kind && accounts.length > 0 && (
+          {(plugin ? !!pluginInfo?.separate : providerId !== kind) && accounts.length > 0 && (
             <MergeProviderButton
-              kind={kind}
+              {...(plugin ? { targets: placementTargets } : { kind })}
               providerId={providerId}
               providerName={providerName ?? providerId}
               disabled={busy}
@@ -310,7 +326,7 @@ export function SubscriptionAccountsSection({
               {dashboard.label}
             </Button>
           )}
-          {!ccCare && <Button
+          {!ccCare && (!plugin || pluginMethods.length > 0) && <Button
             data-settings-search-action="Add a subscription account or cancel its pending sign-in"
             variant="secondary"
             size="sm"
@@ -320,7 +336,9 @@ export function SubscriptionAccountsSection({
                 void window.electronAPI.subscriptionAccounts
                   .command({ action: 'cancel', providerId, loginKey: login.current })
                   .catch(() => toast.error(t('subscriptionAccounts.failed')));
-              else void run({ action: 'add', providerId, loginKey: crypto.randomUUID() });
+              else void signInFields(t('subscriptionAccounts.add')).then((fields) => {
+                if (fields) void run({ action: 'add', providerId, loginKey: crypto.randomUUID(), ...fields });
+              });
             }}
           >
             {busy ? <Spinner size={13} /> : <Plus size={14} />}
@@ -390,19 +408,25 @@ export function SubscriptionAccountsSection({
                 const name =
                   account.identity ||
                   t('providerGroup.member.accountFallback', { index: index + 1 });
-                const plan =
+                const plan = plugin ? account.plan :
                   kind === 'openai'
                     ? formatCodexPlanLabel(account.planType ?? account.plan)
                     : formatClaudeSubscriptionPlanLabel(account.plan, account.planTier, account.planDisplayName);
-                const usage = buildSubscriptionAccountUsageCard(
-                  account.usage,
-                  t,
-                  Date.now(),
-                  locale,
-                );
+                const usage = plugin
+                  ? account.usage?.plugin
+                    ? pluginEngineUsageAccount(account.usage.plugin, {
+                      title: t('quotaCard.usageTitle'), now: Date.now(), language: locale ?? 'en', t,
+                    })
+                    : null
+                  : buildSubscriptionAccountUsageCard(
+                    account.usage,
+                    t,
+                    Date.now(),
+                    locale,
+                  );
                 // As in provider groups, a usable account reports its load; other states add it.
                 const running = t('providerGroup.member.runningCount', { count: account.running });
-                const state = account.authIssue === 'claude-account-mismatch'
+                const state = account.authIssue === 'claude-account-mismatch' || account.authIssue === 'account-mismatch'
                   ? t('subscriptionAccounts.loginIdentityMismatchStatus')
                   : account.paused
                   ? t('providerGroup.member.status.paused')
@@ -434,13 +458,17 @@ export function SubscriptionAccountsSection({
                   date: new Intl.DateTimeFormat(isClassicalLocale(locale) ? modernLocaleOf(locale) : locale,
                     { dateStyle: 'medium', timeStyle: 'short' }).format(expiresAt),
                 }) : expiryText;
-                const signIn = () => void run({
-                  action: 'login', providerId, accountId: account.id, loginKey: crypto.randomUUID(),
+                const signIn = () => void signInFields(t('subscriptionAccounts.loginAccountAria', { name })).then((fields) => {
+                  if (fields) void run({
+                    action: 'login', providerId, accountId: account.id, loginKey: crypto.randomUUID(), ...fields,
+                  });
                 });
+                // An engine whose plugin only reports its one login has nothing to configure here.
+                const identityOnly = plugin && pluginMethods.length === 0;
                 const resetScope = account.codexResetProviderId ?? codexResetScope(account.id);
                 // Reset settings do not depend on a successful usage read. A replaced
                 // identity remounts the reader; ordinary running-count changes do not.
-                const resetNode = kind === 'openai' && connected ? (
+                const resetNode = !plugin && kind === 'openai' && connected ? (
                   <AccountResetCredits key={`${resetScope}:${account.identity ?? ''}`} scope={resetScope} />
                 ) : null;
                 const usageNode =
@@ -495,14 +523,14 @@ export function SubscriptionAccountsSection({
                               />
                               <span title={status} className="min-w-0 truncate">{status}</span>
                             </span>
-                            {kind === 'anthropic' && connected && (
+                            {!plugin && kind === 'anthropic' && connected && (
                               <Tip text={expiryDetail}>
                                 <span className={cn('min-w-0', expiring && 'text-[var(--warning-fg)]')}>
                                   {expiryText}
                                 </span>
                               </Tip>
                             )}
-                            {!ccCare && (account.status === 'signed-out' || (kind === 'anthropic' && connected && expiring)) && (
+                            {!ccCare && !identityOnly && (account.status === 'signed-out' || (!plugin && kind === 'anthropic' && connected && expiring)) && (
                               <Button
                                 data-settings-search-action="Sign in again to this subscription account"
                                 variant="secondary"
@@ -524,7 +552,7 @@ export function SubscriptionAccountsSection({
                           </div>
                         </div>
                       </div>
-                      <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+                      {!identityOnly && <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
                         <Select
                           {...accountSetting.controlProps}
                           label={t('providerGroup.member.limitAria', { name })}
@@ -626,7 +654,7 @@ export function SubscriptionAccountsSection({
                             </DropdownMenuItem>
                             <MoveAccountMenu
                               targets={placementTargets}
-                              canTakeOut={providerId === kind || accounts.length > 1}
+                              canTakeOut={plugin ? !pluginInfo?.separate || accounts.length > 1 : providerId === kind || accounts.length > 1}
                               disabled={busy}
                               onMove={(target) => void moveAccount({ id: account.id, name }, target)}
                             />
@@ -659,7 +687,7 @@ export function SubscriptionAccountsSection({
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      </div>
+                      </div>}
                     </div>
                     {/* Usage sits under the account name (from the avatar edge when narrow, so the
                         labels keep their column); the right edge meets the row controls. */}
