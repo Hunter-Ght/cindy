@@ -63,6 +63,16 @@ vi.mock('../placement.js', () => ({
   discardUnusedSubscriptionAccountPlacement: async () => {},
   placeSubscriptionAccount: async () => {},
 }));
+// 上游 2026-11 起账号视图会读 OpenAI API Key 成员(独立文件);本测试不涉及,用空的内存替身。
+vi.mock('../apiKeyMembers.js', () => ({
+  apiKeyMemberForConnection: () => undefined,
+  apiKeyPoolMember: () => undefined,
+  apiKeyPoolMembers: () => [],
+  hasApiKeyPoolWithMultipleMembers: () => false,
+  apiKeyPoolAllowsAutoSwitch: () => true,
+  legacyApiKeyPoolBinding: () => undefined,
+  poolDispatchOrder: (_provider: string, accounts: unknown[]) => accounts,
+}));
 vi.mock('node:fs/promises', () => ({ mkdir: vi.fn() }));
 vi.mock('../store.js', () => ({
   readLegacyCodexProviderId: () => undefined,

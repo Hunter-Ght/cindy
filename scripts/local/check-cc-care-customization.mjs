@@ -90,7 +90,7 @@ const version = JSON.parse(read('apps/desktop/package.json')).version;
 if (version !== '0.0.0') failures.push(`apps/desktop/package.json version 为 ${version},必须保持 0.0.0(否则官方更新会覆盖定制版)`);
 
 function sourceFiles() {
-  const out = execFileSync('git', ['ls-files', 'apps/desktop/src', 'packages'], { cwd: root, encoding: 'utf8' });
+  const out = execFileSync('git', ['ls-files', 'apps/desktop/src', 'packages'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return out.split('\n').filter((f) => /\.(m?ts|tsx)$/.test(f) && !/__tests__|\.test\.tsx?$|\/dist\//.test(f));
 }
 

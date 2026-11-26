@@ -220,6 +220,18 @@ pnpm test:unit:related
 - 账号设置默认场景 Light / Dark 检查及总览目检通过；未实测真实登录、CC Care 专属卡片与跨机界面。
   文档与 test-hygiene 检查通过，本次上游无新增数据库迁移。
 
+### 2026-11-26 同步至 `2598f73d25`
+
+- 相对上次合并新增 834 条非合并提交、2717 个文件；回滚点 `backup/cc-care-20261126-0124-before-upstream-sync`。
+  依赖与锁文件无变化，无需重新安装。
+- 冲突 4 处，均按语义保留两边：`claude-native-cli.ts` 的 `runCli` 同时接收上游 `cloudLogin` 与定制 `configDir`；
+  `store.ts` 的 `readPool` 用上游 `invalidateIfChanged(60_000)` 后仍走 `filterCcCarePool`；`runtime.ts` 账号视图
+  保留上游 OpenAI API Key 成员，再交给 `applyCcCarePoolView`；设置页账号菜单沿用上游 `!account.apiKey` 分组，
+  CC Care 下继续隐藏「登录 / 重新登录」与「移出」（及其分隔线）。
+- `ccCare.test.ts` 补上游新增的 `apiKeyMembers.js` 空内存替身（否则会读真实账号目录）。
+- 定制自检脚本 `git ls-files` 输出超过 1 MB 默认缓冲（ENOBUFS），`maxBuffer` 调到 64 MB，检查逻辑不变。
+- 新增数据库迁移 `0162_schedule_mr_observation`（本机安装版到 0161）：安装前需退出 App 并备份数据。
+
 ## 6. 打包与安装流程
 
 **打包必须由用户在系统 Terminal.app 里执行**（不要用 CC Care 打开的终端）：Agent 的 shell 运行在

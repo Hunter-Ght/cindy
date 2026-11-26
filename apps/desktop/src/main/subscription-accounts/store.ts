@@ -125,7 +125,7 @@ export function accountDirectory(provider: SubscriptionProvider, id: string): st
   );
 }
 export function readPool(provider: SubscriptionProvider): SubscriptionPoolConfig | null {
-  store.invalidateIfChanged();
+  store.invalidateIfChanged(60_000);
   // 本地定制:CC Care 管理 Claude 账号时只留默认账号与各环境账号(见 ccCare.ts)。
   return filterCcCarePool(provider, store.read().pools[provider] ?? null);
 }
@@ -235,14 +235,18 @@ export async function writeAccountBindings(
   accountId: string,
   /** The provider the task named (placement.ts); omitted for the built-in provider. */
   via?: string,
+  assertCurrent?: () => void,
 ): Promise<void> {
   const through = via && via !== providerId ? { via } : {};
-  await store.updateAtomic(({ value }) => ({
-    bindings: {
-      ...value.bindings,
-      ...Object.fromEntries(
-        keys.filter(Boolean).map((key) => [`${providerId}:${key}`, { providerId, accountId, ...through }]),
-      ),
-    },
-  }));
+  await store.updateAtomic(({ value }) => {
+    assertCurrent?.();
+    return {
+      bindings: {
+        ...value.bindings,
+        ...Object.fromEntries(
+          keys.filter(Boolean).map((key) => [`${providerId}:${key}`, { providerId, accountId, ...through }]),
+        ),
+      },
+    };
+  });
 }

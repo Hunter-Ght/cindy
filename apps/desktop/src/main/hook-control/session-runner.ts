@@ -43,7 +43,6 @@ import { stripInternalWebCitations } from '@cindy/maker-shared/internal-citation
 import { MAIN_OWNED_SEND_CONTEXT } from '@cindy/maker-core';
 
 import type {
-  AgentKind,
   EngineKind,
   InteractionRequest,
   PermissionMode,
@@ -60,7 +59,7 @@ import {
 
 import { emitSessionCreated } from '../localDb/ipc/sessionCreatedBroadcast.js';
 import { getMaker } from '../maker-host/index.js';
-import { isPluginEngineTask, PluginEngineUnsupportedError } from '../maker-host/engineKind.js';
+import { hasBuiltinAgentKind } from '../maker-host/engineKind.js';
 import { setSessionEffort, setSessionFastMode } from '../maker-host/session-effort-store.js';
 import { desktopSessionStorage } from '../maker-host/session-storage.js';
 import { resolveLenientRoute } from '../maker-host/model-route-guard.js';
@@ -169,14 +168,6 @@ import { imText } from '../im/shared/imText.js';
 import { modernLocaleOf } from '../../shared/locale.js';
 
 type MainOwnedImChannel = Extract<TurnPermissionOrigin, { kind: 'im' }>['channel'];
-
-/** Official hooks do not run plugin-engine tasks in phase 1 (docs/plans/acp-plugin-bridge.md). */
-const OFFICIAL_CHANNEL_FEATURE = 'Official bot channels';
-
-/** Refuses only plugin-engine tasks; every other session keeps its existing hook path. */
-function runsOnBuiltinEngine<T extends { agentKind: EngineKind }>(value: T): value is T & { agentKind: AgentKind } {
-  return !isPluginEngineTask(value);
-}
 
 function mainOwnedChannelOrigin(value: string | undefined): TurnPermissionOrigin | null {
   switch (value) {
@@ -299,9 +290,23 @@ export function sharedImProjectFingerprint(alias: string): string {
     'slack', { alias, teamId: null }, true));
 }
 
-export function resolveSharedImProjectConfig(alias: string, log: { warn(msg: string): void }) {
+/**
+ * 共享项目设置的「默认设置指纹」, 与 resolveSharedImProjectConfig 返回的 fingerprint 同一口径
+ * (固定模型时相等): 个人飞书 bot 绑定了项目的群任务跟随这一行时, 每条消息只比这个, 不必每次解析。
+ */
+export function sharedImProjectDefaultsFingerprint(alias: string): string {
+  return hookDefaultsFingerprint(hookDefaultInputs({ agentKind: null, model: null, effort: null, permissionMode: null },
+    'slack', { alias, teamId: null }, true));
+}
+
+/** `providerSnapshot`: 一次解析多个项目时共用同一份供应商目录(缺省现取)。 */
+export function resolveSharedImProjectConfig(
+  alias: string,
+  log: { warn(msg: string): void },
+  providerSnapshot?: ProviderView[],
+) {
   return resolveNewSessionConfig({ agentKind: null, model: null, effort: null, permissionMode: null },
-    log, 'slack', { alias, teamId: null }, undefined, true);
+    log, 'slack', { alias, teamId: null }, providerSnapshot, true);
 }
 
 /**
@@ -793,7 +798,7 @@ export function createMakerHookSessionRunner(deps: {
           if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
         }
       }
-      return { workingDir, usable };
+      return { workingDir, usable, companionOwned: row?.source === 'bot' };
     },
 
     async run(req: HookRunRequest, releaseSendLock = (): void => {}) {
@@ -838,7 +843,7 @@ export function createMakerHookSessionRunner(deps: {
       let effort = resolved?.effort;
       let resumeSessionId: string | undefined;
       let companionFastMode: boolean | 'ultrafast' | undefined;
-      let effectiveAgentKind: AgentKind = resolved?.agentKind ?? 'claude-code';
+      let effectiveAgentKind: EngineKind = resolved?.agentKind ?? 'claude-code';
       // 新建路径 resolved 必有值(capabilities 校验过); 复用路径由下方 meta 覆盖
       let permissionMode: PermissionMode = (resolved?.permissionMode ??
         'bypassPermissions') as PermissionMode;
@@ -859,8 +864,7 @@ export function createMakerHookSessionRunner(deps: {
           workingDir = meta.workDir;
           model = meta.model;
           resumeSessionId = meta.sdkSessionId;
-          // 插件引擎任务不接官方渠道(docs/plans/acp-plugin-bridge.md):明确拒绝,不按内置引擎重开。
-          if (meta.agentKind === 'acp') throw new PluginEngineUnsupportedError(OFFICIAL_CHANNEL_FEATURE);
+          // 插件引擎任务(docs/plans/acp-plugin-bridge.md)同样接官方渠道：按它自己的引擎与 providerId 恢复。
           effectiveAgentKind = meta.agentKind;
         }
         effort = req.companionBotId ? meta?.effort : undefined;
@@ -876,10 +880,15 @@ export function createMakerHookSessionRunner(deps: {
         agentDeviceId = row?.agentDeviceId ?? meta?.agentDeviceId ?? null;
       }
 
-      const fail = (msg: string, finalText = ''): HookRunOutcome => ({
+      const fail = (
+        msg: string,
+        finalText = '',
+        errorReason?: string | null,
+      ): HookRunOutcome => ({
         status: 'error',
         finalText,
         errorMessage: msg,
+        ...(errorReason ? { errorReason } : {}),
         durationMs: Date.now() - startedAt,
       });
 
@@ -1151,11 +1160,6 @@ export function createMakerHookSessionRunner(deps: {
           }
           return fail(err instanceof Error ? err.message : String(err));
         }
-      }
-      // maker.createSession 对已活着的同 id 实例直接复用:那个实例若跑在插件引擎上,
-      // 同样明确拒绝(meta 缺失时上方的检查覆盖不到)。
-      if (!runsOnBuiltinEngine(session)) {
-        return fail(new PluginEngineUnsupportedError(OFFICIAL_CHANNEL_FEATURE).message);
       }
 
       // 运行时来源注入(路由层经 session-provider-store 决定上游与钥匙)必须先于
@@ -1795,8 +1799,11 @@ export function createMakerHookSessionRunner(deps: {
                   : {}),
               },
             });
-            await beginTurnChangeSetAtDispatch(session, turnChangeAnchorClientId);
-            turnChangeSetStarted = true;
+            // Turn change capture relies on built-in engine hooks (same rule as desktop sends).
+            if (hasBuiltinAgentKind(session)) {
+              await beginTurnChangeSetAtDispatch(session, turnChangeAnchorClientId);
+              turnChangeSetStarted = true;
+            }
             // 每次被接受的 IM 消息都是一次用户发送: bump userSendAt 让排序
             // 时间轴与桌面端 sendMessage 口径一致, sessions:patched 广播顺带把
             // 复用/接管会话即时重排序(新建路径已在广播前落过, 这里更新为实际
@@ -1862,7 +1869,7 @@ export function createMakerHookSessionRunner(deps: {
             surface: 'official',
           })
           : err instanceof Error ? err.message : String(err);
-        return { ...fail(message), ...collected };
+        return { ...fail(message, '', observer.errorReason), ...collected };
       } finally {
         // 无论正常收口还是超时/错误,未决交互都按默认收口并释放中央 route
         finalizeInteractions();
@@ -2038,6 +2045,7 @@ function beginContinuationWatch(
         status: 'error',
         finalText: '',
         errorMessage,
+        ...(observer.errorReason ? { errorReason: observer.errorReason } : {}),
         durationMs: Date.now() - startedAt,
       });
       return;
@@ -2057,6 +2065,7 @@ function beginContinuationWatch(
         status: errorMessage === null ? 'ok' : 'error',
         finalText: collected.finalText,
         errorMessage,
+        ...(errorMessage !== null && observer.errorReason ? { errorReason: observer.errorReason } : {}),
         durationMs: Date.now() - startedAt,
         ...(collected.attachments !== undefined ? { attachments: collected.attachments } : {}),
       });
